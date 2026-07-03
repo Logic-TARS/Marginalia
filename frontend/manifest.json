@@ -1,0 +1,25 @@
+{
+  "name": "Marginalia — 电子书划线笔记",
+  "short_name": "Marginalia",
+  "description": "EPUB 阅读器，支持划线、笔记，同步到飞书",
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#faf9f8",
+  "theme_color": "#4a6cf7",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='32' fill='%234a6cf7'/><text x='96' y='132' font-size='96' text-anchor='middle' fill='white'>📖</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='80' fill='%234a6cf7'/><text x='256' y='350' font-size='256' text-anchor='middle' fill='white'>📖</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

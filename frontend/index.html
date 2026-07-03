@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#4a6cf7">
+  <meta name="description" content="Marginalia — 电子书划线笔记，连接飞书与短视频">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>📖</text></svg>">
+  <title>Marginalia</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js"></script>
+</head>
+<body>
+  <div id="app" class="app-container">
+
+    <!-- ============ LIBRARY VIEW ============ -->
+    <div id="library-view" class="view active">
+      <header class="library-header">
+        <h1 class="app-title">📖 Marginalia</h1>
+        <p class="app-subtitle">划线 · 笔记 · 飞书 · 短视频</p>
+      </header>
+
+      <div class="library-actions">
+        <label class="btn btn-primary import-btn">
+          <span class="btn-icon">📂</span> 导入 EPUB
+          <input type="file" id="file-input" accept=".epub" hidden>
+        </label>
+      </div>
+
+      <div class="book-list" id="book-list">
+        <div class="empty-state" id="empty-library">
+          <div class="empty-icon">📚</div>
+          <p>还没有书，点击上方导入第一本 EPUB</p>
+          <p class="empty-hint">支持 Project Gutenberg 等来源的 .epub 文件</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ READER VIEW ============ -->
+    <div id="reader-view" class="view">
+
+      <!-- Top toolbar -->
+      <div class="reader-toolbar">
+        <button class="btn btn-icon" id="btn-back" title="返回书库">
+          <span>←</span> 书库
+        </button>
+        <div class="toolbar-info">
+          <span class="book-title-label" id="toolbar-book-title">书名</span>
+          <span class="chapter-label" id="toolbar-chapter">章节</span>
+        </div>
+        <button class="btn btn-icon" id="btn-toggle-notes" title="笔记面板">
+          <span>📝</span>
+        </button>
+      </div>
+
+      <!-- Main reader area -->
+      <div class="reader-main">
+        <div class="epub-container" id="epub-container"></div>
+        <div class="notes-panel" id="notes-panel">
+          <div class="notes-panel-header">
+            <h3>📝 我的划线 & 笔记</h3>
+            <span class="notes-count" id="notes-count">0 条</span>
+          </div>
+          <div class="notes-list" id="notes-list">
+            <div class="empty-notes">
+              <p>选中文字开始划线</p>
+              <p class="empty-hint">划线后可以添加笔记和标签</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom bar -->
+      <div class="reader-footer">
+        <div class="progress-info">
+          <input type="range" id="progress-slider" min="0" max="100" value="0" class="progress-slider">
+          <span class="progress-text" id="progress-text">0%</span>
+        </div>
+        <button class="btn btn-sync" id="btn-sync" disabled>
+          <span class="sync-icon">🔄</span>
+          <span class="sync-label">同步</span>
+          <span class="sync-badge" id="sync-badge" hidden>0</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ============ FLOATING SELECTION TOOLBAR ============ -->
+    <div id="selection-toolbar" class="selection-toolbar" hidden>
+      <button class="btn btn-sm btn-highlight" data-color="yellow" title="黄色高亮">🟡</button>
+      <button class="btn btn-sm btn-highlight" data-color="green" title="绿色高亮">🟢</button>
+      <button class="btn btn-sm btn-highlight" data-color="blue" title="蓝色高亮">🔵</button>
+      <button class="btn btn-sm btn-highlight" data-color="pink" title="粉色高亮">🟣</button>
+      <button class="btn btn-sm btn-note" id="btn-add-note" title="添加笔记">✏️ 笔记</button>
+    </div>
+
+    <!-- ============ NOTE EDITOR MODAL ============ -->
+    <div id="note-modal" class="modal-overlay" hidden>
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>编辑笔记</h3>
+          <button class="btn btn-icon modal-close" id="btn-close-modal">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="highlight-preview" id="note-preview-text"></div>
+          <textarea id="note-textarea" placeholder="写下你的想法…" rows="4"></textarea>
+          <div class="tag-input-area">
+            <label class="tag-label">标签（逗号分隔）</label>
+            <input type="text" id="tag-input" placeholder="金句, 反思, 哲学…">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-danger btn-sm" id="btn-delete-note" hidden>删除</button>
+          <button class="btn btn-primary" id="btn-save-note">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ TOAST NOTIFICATION ============ -->
+    <div id="toast" class="toast" hidden></div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

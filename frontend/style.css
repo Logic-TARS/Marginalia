@@ -1,0 +1,741 @@
+/* ============ CSS Custom Properties ============ */
+:root {
+  --color-bg: #faf9f8;
+  --color-surface: #ffffff;
+  --color-border: #e8e6e3;
+  --color-text: #1a1a1a;
+  --color-text-secondary: #6b6b6b;
+  --color-text-muted: #999999;
+
+  --color-primary: #4a6cf7;
+  --color-primary-hover: #3b5de7;
+  --color-primary-light: #eef1fe;
+
+  --color-highlight-yellow: rgba(255, 235, 59, 0.45);
+  --color-highlight-green: rgba(76, 175, 80, 0.35);
+  --color-highlight-blue: rgba(33, 150, 243, 0.35);
+  --color-highlight-pink: rgba(233, 30, 99, 0.3);
+
+  --color-danger: #e53935;
+  --color-danger-hover: #c62828;
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+  --shadow-lg: 0 8px 30px rgba(0,0,0,0.12);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", Georgia, serif;
+
+  --toolbar-height: 48px;
+  --footer-height: 48px;
+
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+}
+
+/* ============ Reset & Base ============ */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ============ View Switching ============ */
+.view {
+  display: none;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.view.active {
+  display: flex;
+}
+
+/* ============ Buttons ============ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  user-select: none;
+}
+.btn:active {
+  transform: scale(0.97);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--color-primary);
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+.btn-icon {
+  background: transparent;
+  color: var(--color-text-secondary);
+  padding: 6px 10px;
+  font-size: 14px;
+}
+.btn-icon:hover {
+  background: var(--color-border);
+}
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+.btn-danger {
+  background: transparent;
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+}
+.btn-danger:hover {
+  background: var(--color-danger);
+  color: #fff;
+}
+.btn-sync {
+  background: var(--color-primary);
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  position: relative;
+}
+.btn-sync:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+.btn-sync.syncing {
+  pointer-events: none;
+}
+.btn-sync.syncing .sync-icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ============ Library View ============ */
+.library-header {
+  padding: 32px 20px 16px;
+  text-align: center;
+}
+.app-title {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+.app-subtitle {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}
+
+.library-actions {
+  padding: 0 20px 16px;
+  display: flex;
+  justify-content: center;
+}
+.import-btn {
+  font-size: 15px;
+  padding: 10px 24px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.book-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 20px 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+
+.empty-state {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--color-text-muted);
+}
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+.empty-hint {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}
+
+/* Book card */
+.book-card {
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.book-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.book-card-cover {
+  width: 48px;
+  height: 64px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: #fff;
+  flex-shrink: 0;
+}
+.book-card-info {
+  flex: 1;
+  min-width: 0;
+}
+.book-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.book-card-author {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}
+.book-card-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.book-card-progress {
+  margin-top: 6px;
+  height: 3px;
+  background: var(--color-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.book-card-progress-bar {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 2px;
+  transition: width var(--transition-normal);
+}
+.book-card-delete {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+.book-card:hover .book-card-delete {
+  opacity: 1;
+}
+.book-card-delete:hover {
+  color: var(--color-danger);
+}
+
+/* ============ Reader View ============ */
+.reader-toolbar {
+  height: var(--toolbar-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.toolbar-info {
+  text-align: center;
+  overflow: hidden;
+  flex: 1;
+  padding: 0 8px;
+}
+.book-title-label {
+  font-size: 14px;
+  font-weight: 600;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chapter-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Reader main area */
+.reader-main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+.epub-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* epub.js renders inside this */
+}
+.epub-container iframe {
+  border: none;
+  width: 100%;
+  height: 100%;
+}
+
+/* Notes panel */
+.notes-panel {
+  width: 340px;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  transition: transform var(--transition-normal);
+}
+.notes-panel.collapsed {
+  transform: translateX(100%);
+  /* On mobile, we'll use a different approach */
+}
+
+.notes-panel-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+.notes-panel-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.notes-count {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.notes-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+.empty-notes {
+  text-align: center;
+  padding: 40px 16px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+/* Note item */
+.note-item {
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.note-item:hover {
+  box-shadow: var(--shadow-sm);
+}
+.note-item.highlight-yellow { border-left-color: #fdd835; }
+.note-item.highlight-green  { border-left-color: #66bb6a; }
+.note-item.highlight-blue   { border-left-color: #42a5f5; }
+.note-item.highlight-pink   { border-left-color: #ec407a; }
+
+.note-item-text {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text);
+}
+.note-item-note {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-style: italic;
+  padding: 6px 8px;
+  background: var(--color-primary-light);
+  border-radius: 4px;
+  display: none;
+}
+.note-item-note.has-note {
+  display: block;
+}
+.note-item-tags {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.note-item-tag {
+  font-size: 11px;
+  padding: 2px 7px;
+  background: var(--color-border);
+  border-radius: 10px;
+  color: var(--color-text-secondary);
+}
+.note-item-meta {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}
+
+/* Reader footer */
+.reader-footer {
+  height: var(--footer-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  gap: 12px;
+  flex-shrink: 0;
+}
+.progress-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+.progress-slider {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--color-border);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+.progress-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  cursor: pointer;
+}
+.progress-text {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  min-width: 36px;
+  text-align: right;
+}
+.sync-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 10px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+/* ============ Selection Toolbar ============ */
+.selection-toolbar {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  animation: toolbarIn var(--transition-fast);
+}
+.selection-toolbar[hidden] {
+  display: none;
+}
+
+@keyframes toolbarIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.btn-highlight {
+  font-size: 16px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 2px solid transparent;
+  transition: all var(--transition-fast);
+}
+.btn-highlight:hover {
+  background: var(--color-bg);
+  border-color: var(--color-border);
+}
+.btn-note {
+  font-size: 13px;
+  padding: 5px 10px;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.btn-note:hover {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+/* ============ epub.js Highlight Overrides ============ */
+.epub-container ::highlight(yellow) {
+  background-color: var(--color-highlight-yellow);
+}
+.epub-container ::highlight(green) {
+  background-color: var(--color-highlight-green);
+}
+.epub-container ::highlight(blue) {
+  background-color: var(--color-highlight-blue);
+}
+.epub-container ::highlight(pink) {
+  background-color: var(--color-highlight-pink);
+}
+
+/* ============ Modal ============ */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn var(--transition-fast);
+}
+.modal-overlay[hidden] {
+  display: none;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-card {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  width: 90%;
+  max-width: 420px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp var(--transition-normal);
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+.modal-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.modal-close {
+  font-size: 18px;
+}
+
+.modal-body {
+  padding: 16px;
+  overflow-y: auto;
+}
+.highlight-preview {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 10px 12px;
+  background: rgba(255, 235, 59, 0.2);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  border-left: 3px solid #fdd835;
+}
+#note-textarea {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: var(--font-sans);
+  resize: vertical;
+  line-height: 1.5;
+}
+#note-textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+.tag-input-area {
+  margin-top: 10px;
+}
+.tag-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  display: block;
+  margin-bottom: 4px;
+}
+#tag-input {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: var(--font-sans);
+}
+#tag-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+/* ============ Toast ============ */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  padding: 10px 20px;
+  border-radius: 20px;
+  font-size: 14px;
+  box-shadow: var(--shadow-md);
+  animation: toastIn var(--transition-normal);
+  pointer-events: none;
+}
+.toast[hidden] {
+  display: none;
+}
+.toast.success {
+  background: #43a047;
+  color: #fff;
+}
+.toast.error {
+  background: var(--color-danger);
+  color: #fff;
+}
+.toast.info {
+  background: var(--color-text);
+  color: #fff;
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ============ Responsive ============ */
+@media (max-width: 768px) {
+  .reader-main {
+    flex-direction: column;
+  }
+  .notes-panel {
+    position: fixed;
+    right: 0;
+    top: var(--toolbar-height);
+    bottom: var(--footer-height);
+    width: 85%;
+    max-width: 360px;
+    z-index: 50;
+    box-shadow: var(--shadow-lg);
+    transform: translateX(100%);
+  }
+  .notes-panel.open {
+    transform: translateX(0);
+  }
+  .book-list {
+    grid-template-columns: 1fr;
+  }
+  .epub-container {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .library-header {
+    padding: 24px 16px 12px;
+  }
+  .app-title {
+    font-size: 24px;
+  }
+  .notes-panel {
+    width: 100%;
+    max-width: none;
+  }
+}
