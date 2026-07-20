@@ -778,38 +778,6 @@
   }
 
   function handleLocationChange(location) {
-    // TEMPORARY DIAGNOSTIC PROBE — remove in Todo 4
-    const __probe = window.location.search.includes('__probe=boundary') || window.__PROBE_BOUNDARY;
-    if (__probe && location && location.start) {
-      const dumps = window.__probeDump || (window.__probeDump = []);
-      const captureDump = (delay) => {
-        setTimeout(() => {
-          try {
-            const iframe = document.querySelector('#epub-container iframe');
-            const view = iframe ? iframe.contentDocument.querySelector('.epub-view') : null;
-            const containerRect = document.querySelector('#epub-container').getBoundingClientRect();
-            const viewRect = view ? view.getBoundingClientRect() : { left: 0 };
-            dumps.push({
-              delay: delay,
-              cfi: location.start.cfi,
-              href: location.start.href,
-              displayedPage: location.start.displayed ? location.start.displayed.page : null,
-              displayedTotal: location.start.displayed ? location.start.displayed.total : null,
-              containerLeft: containerRect.left,
-              viewLeft: viewRect.left,
-              iframeScrollLeft: iframe ? iframe.contentWindow.scrollX : null,
-              timestamp: Date.now(),
-            });
-            if (dumps.length >= 3) {
-              window.dispatchEvent(new CustomEvent('probe:dump', { detail: dumps }));
-            }
-          } catch (e) { /* ignore probe errors */ }
-        }, delay);
-      };
-      requestAnimationFrame(() => { captureDump(0); captureDump(100); captureDump(300); });
-    }
-    // END TEMPORARY DIAGNOSTIC PROBE
-
     if (!location || !location.start) return;
     currentCfi = location.start.cfi;
     let percent = location.start.percentage;
@@ -995,9 +963,67 @@
 
     let navigation;
     try {
-      navigation = direction === 'next'
-        ? currentRendition.next()
-        : currentRendition.prev();
+      // Boundary guard: detect cross-section edges and use display() instead of next()/prev()
+      const currentLoc = currentRendition.currentLocation();
+      let spineItem = null;
+      let currentSectionHref = null;
+
+      if (currentLoc && currentLoc.start && currentLoc.start.href) {
+        currentSectionHref = currentLoc.start.href.split('#')[0];
+        // Find the spine item for the current section
+        if (currentBook && currentBook.spine) {
+          spineItem = (typeof currentBook.spine.get === 'function')
+            ? currentBook.spine.get(currentSectionHref)
+            : (currentBook.spine.spineItems || []).find(function(s) { return s.href === currentSectionHref; });
+        }
+      }
+
+      const atForwardBoundary = currentLoc && (
+        currentLoc.atEnd === true ||
+        (currentLoc.start && currentLoc.start.displayed &&
+         currentLoc.start.displayed.page >= currentLoc.start.displayed.total)
+      );
+      const atBackwardBoundary = currentLoc && (
+        currentLoc.atStart === true ||
+        (currentLoc.start && currentLoc.start.displayed &&
+         currentLoc.start.displayed.page === 1)
+      );
+
+      if (direction === 'next' && atForwardBoundary && spineItem && spineItem.next()) {
+        // Cross-section forward: display next section from start
+        pageNavigationToken += 1;
+        const nextSpine = spineItem.next();
+        console.log('Cross-section forward:', currentSectionHref, '\u2192', nextSpine.href);
+        navigation = currentRendition.display(nextSpine.href, false);
+      } else if (direction === 'prev' && atBackwardBoundary && spineItem && spineItem.prev()) {
+        // Cross-section backward: display previous section from end
+        pageNavigationToken += 1;
+        const prevSpine = spineItem.prev();
+        console.log('Cross-section backward:', currentSectionHref, '\u2192', prevSpine.href);
+        if (currentRendition.book && getLocationCount(currentRendition.book.locations) > 0) {
+          try {
+            const prevEndCfi = currentRendition.book.locations.cfiFromPercentage(1);
+            if (prevEndCfi && typeof prevEndCfi.then === 'function') {
+              navigation = prevEndCfi.then(function(cfi) {
+                return currentRendition.display(cfi);
+              }).catch(function() {
+                return currentRendition.display(prevSpine.href, true);
+              });
+            } else {
+              navigation = currentRendition.display(prevEndCfi);
+            }
+          } catch (_e) {
+            navigation = currentRendition.display(prevSpine.href, true);
+          }
+        } else {
+          navigation = currentRendition.display(prevSpine.href, true);
+        }
+      } else {
+        // Same-section navigation: use existing next()/prev()
+        navigation = direction === 'next'
+          ? currentRendition.next()
+          : currentRendition.prev();
+      }
     } catch (err) {
       console.warn('Page navigation failed:', source, err);
       pageNavigationInProgress = false;
