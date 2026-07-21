@@ -2,7 +2,7 @@
  * Marginalia Service Worker
  * Cache-first for app shell, network-first for API calls
  */
-const CACHE_NAME = 'marginalia-v1';
+const CACHE_NAME = 'marginalia-v4';
 
 const APP_SHELL = [
   '.',
@@ -10,25 +10,15 @@ const APP_SHELL = [
   'app.js',
   'style.css',
   'manifest.json',
+  'jszip.min.js',
+  'epub.min.js',
 ];
 
-const CDN_URLS = [
-  'https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js',
-];
-
-// Install: cache app shell and CDN resources
+// Install: cache app shell
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    Promise.all([
-      caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)),
-      caches.open(CACHE_NAME).then((cache) =>
-        Promise.allSettled(CDN_URLS.map((url) =>
-          cache.add(url).catch((err) =>
-            console.warn('SW: Failed to cache CDN resource:', url, err)
-          )
-        ))
-      ),
-    ]).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -43,9 +33,31 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch: cache-first for app shell/CDN, network-first for API
+function cacheFirst(request) {
+  return caches.match(request).then((cached) => {
+    if (cached) return cached;
+
+    return fetch(request).then((response) => {
+      if (request.method === 'GET' && response.status === 200) {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => {
+          cache.put(request, clone);
+        });
+      }
+      return response;
+    });
+  });
+}
+
+// Fetch: cache-first for app shell/books, network-first for API data
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+
+  // Server-side EPUB files are static and expensive over remote links.
+  if (event.request.method === 'GET' && url.pathname.startsWith('/api/books/')) {
+    event.respondWith(cacheFirst(event.request));
+    return;
+  }
 
   // API calls: network-first (don't cache)
   if (url.pathname.startsWith('/api/')) {
@@ -62,25 +74,12 @@ self.addEventListener('fetch', (event) => {
 
   // Everything else: cache-first, fallback to network
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-
-      return fetch(event.request).then((response) => {
-        // Cache successful GET responses
-        if (event.request.method === 'GET' && response.status === 200) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, clone);
-          });
-        }
-        return response;
-      }).catch(() => {
+    cacheFirst(event.request).catch(() => {
         // Offline fallback for navigation
         if (event.request.mode === 'navigate') {
           return caches.match('index.html');
         }
         return new Response('Offline', { status: 503 });
-      });
     })
   );
 });

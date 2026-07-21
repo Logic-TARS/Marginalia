@@ -3,122 +3,266 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#4a6cf7">
-  <meta name="description" content="Marginalia — 电子书划线笔记，连接飞书与短视频">
+  <meta name="theme-color" content="#2f3a32">
+  <meta name="description" content="Marginalia - 阅读划线、读书感悟、内容创作与 Obsidian 导出">
   <link rel="manifest" href="manifest.json">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>📖</text></svg>">
   <title>Marginalia</title>
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js"></script>
+  <script src="jszip.min.js"></script>
+  <script src="epub.min.js"></script>
 </head>
 <body>
   <div id="app" class="app-container">
+    <nav class="app-nav" aria-label="主导航">
+      <div class="brand">
+        <span class="brand-mark">M</span>
+        <div class="brand-copy">
+          <strong>Marginalia</strong>
+          <span>从阅读到成稿</span>
+        </div>
+      </div>
+      <div class="nav-tabs">
+        <button class="nav-tab active" id="btn-nav-library" type="button">书库</button>
+        <button class="nav-tab" id="btn-nav-read" type="button">阅读</button>
+        <button class="nav-tab" id="btn-nav-create" type="button">创作</button>
+      </div>
+    </nav>
 
-    <!-- ============ LIBRARY VIEW ============ -->
     <div id="library-view" class="view active">
       <header class="library-header">
-        <h1 class="app-title">📖 Marginalia</h1>
-        <p class="app-subtitle">划线 · 笔记 · 飞书 · 短视频</p>
+        <div class="page-heading">
+          <span class="eyebrow">Library</span>
+          <h1 class="app-title">你的阅读素材库</h1>
+          <p class="app-subtitle">导入 EPUB，阅读时划线，沉淀感悟，再把素材送进创作工作台。</p>
+        </div>
+        <div class="library-actions">
+          <label class="btn btn-primary import-btn">
+            导入 EPUB
+            <input type="file" id="file-input" accept=".epub" hidden>
+          </label>
+          <button class="btn btn-secondary" id="btn-library-create" type="button">进入创作</button>
+        </div>
       </header>
 
-      <div class="library-actions">
-        <label class="btn btn-primary import-btn">
-          <span class="btn-icon">📂</span> 导入 EPUB
-          <input type="file" id="file-input" accept=".epub" hidden>
-        </label>
-      </div>
-
-      <div class="book-list" id="book-list">
+      <main class="book-list" id="book-list">
         <div class="empty-state" id="empty-library">
-          <div class="empty-icon">📚</div>
-          <p>还没有书，点击上方导入第一本 EPUB</p>
-          <p class="empty-hint">支持 Project Gutenberg 等来源的 .epub 文件</p>
+          <div class="empty-icon">M</div>
+          <p>还没有书</p>
+          <p class="empty-hint">导入一本 EPUB，或把 EPUB 放到 backend/data/books 后刷新页面。</p>
         </div>
-      </div>
+      </main>
     </div>
 
-    <!-- ============ READER VIEW ============ -->
     <div id="reader-view" class="view">
-
-      <!-- Top toolbar -->
       <div class="reader-toolbar">
-        <button class="btn btn-icon" id="btn-back" title="返回书库">
-          <span>←</span> 书库
-        </button>
+        <button class="btn btn-ghost" id="btn-back" title="返回书库" type="button">返回书库</button>
         <div class="toolbar-info">
-          <span class="book-title-label" id="toolbar-book-title">书名</span>
-          <span class="chapter-label" id="toolbar-chapter">章节</span>
+          <span class="book-title-label" id="toolbar-book-title">未打开书籍</span>
+          <span class="chapter-label" id="toolbar-chapter">选择一本书开始阅读</span>
         </div>
-        <button class="btn btn-icon" id="btn-toggle-notes" title="笔记面板">
-          <span>📝</span>
-        </button>
+        <div class="toolbar-search" id="toolbar-search">
+          <input class="search-input" id="search-input" placeholder="搜索本书…" type="text" autocomplete="off">
+          <button class="btn btn-ghost btn-search" id="btn-search" title="搜索" type="button">🔍</button>
+          <button class="btn btn-ghost btn-search-close" id="btn-search-close" title="关闭搜索" type="button" hidden>✕</button>
+        </div>
+        <button class="btn btn-ghost" id="btn-toggle-ai" title="切换 AI 问答面板" type="button">AI 问答</button>
+        <button class="btn btn-ghost" id="btn-add-bookmark" title="添加当前位置为书签" type="button">书签</button>
+        <button class="btn btn-ghost" id="btn-toggle-notes" title="切换划线面板" type="button">划线面板</button>
+        <button class="btn btn-ghost" id="btn-toggle-search" title="搜索本书" type="button">搜索</button>
       </div>
 
-      <!-- Main reader area -->
-      <div class="reader-main">
-        <div class="epub-container" id="epub-container"></div>
-        <div class="notes-panel" id="notes-panel">
+      <div class="reader-main ai-collapsed">
+        <aside class="ai-panel collapsed" id="ai-panel">
+          <div class="ai-panel-header">
+            <div>
+              <h3>AI 问答</h3>
+              <p>结合当前书籍、划线和感悟回答。</p>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="btn-close-ai" type="button">收起</button>
+          </div>
+          <div class="ai-quick-actions">
+            <button type="button" data-ai-question="解释这一章的核心意思">解释这一章</button>
+            <button type="button" data-ai-question="总结这本书目前出现的核心观点">总结核心观点</button>
+            <button type="button" data-ai-question="我应该怎么理解最近的划线？">理解划线</button>
+          </div>
+          <div class="ai-messages" id="ai-messages">
+            <div class="ai-empty">问一个和这本书有关的问题。</div>
+          </div>
+          <form class="ai-input-row" id="ai-form">
+            <textarea id="ai-question-input" rows="3" placeholder="例如：这一章在讲什么？"></textarea>
+            <button class="btn btn-primary" id="btn-send-ai" type="submit">发送</button>
+          </form>
+        </aside>
+        <div class="reader-viewport">
+          <button class="nav-btn nav-btn-prev" id="btn-nav-prev" title="上一页" type="button">&lsaquo;</button>
+          <button class="nav-btn nav-btn-next" id="btn-nav-next" title="下一页" type="button">&rsaquo;</button>
+          <div class="epub-container" id="epub-container">
+          <div class="reader-loading" id="reader-loading" hidden>
+            <div class="reader-loading-spinner" aria-hidden="true"></div>
+            <div class="reader-loading-copy">
+              <strong id="reader-loading-message">正在加载…</strong>
+              <span id="reader-loading-detail">请稍候</span>
+            </div>
+            <div class="reader-loading-progress" id="reader-loading-progress" hidden>
+              <div class="reader-loading-progress-bar" id="reader-loading-progress-bar"></div>
+              <span class="reader-loading-progress-text" id="reader-loading-progress-text">0%</span>
+            </div>
+          </div>
+          </div>
+          <aside class="search-panel" id="search-panel" hidden>
+            <div class="search-panel-header">
+              <h3>搜索结果</h3>
+              <span class="search-count" id="search-count">0 条</span>
+            </div>
+            <div class="search-results" id="search-results">
+              <div class="empty-search">输入关键词搜索本书内容</div>
+            </div>
+          </aside>
+        </div>
+        <aside class="notes-panel" id="notes-panel">
           <div class="notes-panel-header">
-            <h3>📝 我的划线 & 笔记</h3>
+            <div>
+              <h3>划线与感悟</h3>
+              <p>单击跳回原文，双击编辑感悟。</p>
+            </div>
             <span class="notes-count" id="notes-count">0 条</span>
           </div>
+          <section class="bookmarks-section" aria-label="书签">
+            <div class="bookmarks-heading">
+              <span>书签</span>
+              <span class="bookmarks-count" id="bookmarks-count">0</span>
+            </div>
+            <div class="bookmarks-list" id="bookmarks-list">
+              <div class="empty-bookmarks">还没有书签</div>
+            </div>
+          </section>
           <div class="notes-list" id="notes-list">
             <div class="empty-notes">
               <p>选中文字开始划线</p>
-              <p class="empty-hint">划线后可以添加笔记和标签</p>
+              <p class="empty-hint">划线后可以补充感悟和标签。</p>
             </div>
           </div>
-        </div>
+        </aside>
       </div>
 
-      <!-- Bottom bar -->
       <div class="reader-footer">
         <div class="progress-info">
           <input type="range" id="progress-slider" min="0" max="100" value="0" class="progress-slider">
           <span class="progress-text" id="progress-text">0%</span>
+          <span class="page-text" id="page-text">页码计算中...</span>
         </div>
-        <button class="btn btn-sync" id="btn-sync" disabled>
-          <span class="sync-icon">🔄</span>
+        <button class="btn btn-sync" id="btn-sync" disabled type="button">
           <span class="sync-label">同步</span>
           <span class="sync-badge" id="sync-badge" hidden>0</span>
         </button>
       </div>
     </div>
 
-    <!-- ============ FLOATING SELECTION TOOLBAR ============ -->
-    <div id="selection-toolbar" class="selection-toolbar" hidden>
-      <button class="btn btn-sm btn-highlight" data-color="yellow" title="黄色高亮">🟡</button>
-      <button class="btn btn-sm btn-highlight" data-color="green" title="绿色高亮">🟢</button>
-      <button class="btn btn-sm btn-highlight" data-color="blue" title="蓝色高亮">🔵</button>
-      <button class="btn btn-sm btn-highlight" data-color="pink" title="粉色高亮">🟣</button>
-      <button class="btn btn-sm btn-note" id="btn-add-note" title="添加笔记">✏️ 笔记</button>
+    <div id="creation-view" class="view">
+      <header class="creation-header">
+        <div class="page-heading">
+          <span class="eyebrow">Studio</span>
+          <h1>创作工作台</h1>
+          <p>挑选划线素材，补充个人感悟，用 DeepSeek 生成视频号或公众号草稿。</p>
+        </div>
+        <div class="creation-actions">
+          <button class="btn btn-primary" id="btn-refresh-materials" type="button">刷新素材</button>
+          <button class="btn btn-secondary" id="btn-export-book" type="button">导出书籍到 Obsidian</button>
+        </div>
+      </header>
+
+      <div class="creation-layout">
+        <aside class="materials-pane workspace-pane">
+          <div class="pane-heading">
+            <div>
+              <span class="eyebrow">Materials</span>
+              <h2>素材库</h2>
+              <p>从阅读划线中选择本次要展开的观点。</p>
+            </div>
+          </div>
+          <div class="pane-toolbar">
+            <input type="search" id="material-book-filter" placeholder="按书名筛选">
+            <input type="search" id="material-tag-filter" placeholder="按标签筛选">
+          </div>
+          <div class="materials-list" id="materials-list"></div>
+        </aside>
+
+        <section class="reflection-pane workspace-pane paper-pane">
+          <div class="pane-heading">
+            <div>
+              <span class="eyebrow">Reflection</span>
+              <h2>感悟编辑</h2>
+              <p>把摘录变成自己的判断、故事或选题角度。</p>
+            </div>
+            <span id="selected-material-count">0 条已选</span>
+          </div>
+          <div id="selected-material-detail" class="selected-material-detail">
+            <p class="empty-hint">从左侧选择一条素材后编辑感悟；勾选多条素材后生成稿件。</p>
+          </div>
+          <textarea id="reflection-editor" placeholder="写下你的理解、反驳、生活案例，或适合展开成内容的角度。"></textarea>
+          <div class="reflection-actions">
+            <button class="btn btn-danger" id="btn-delete-reflection" disabled type="button">删除感悟</button>
+            <button class="btn btn-primary" id="btn-save-reflection" disabled type="button">保存感悟</button>
+          </div>
+        </section>
+
+        <section class="draft-pane workspace-pane editor-pane">
+          <div class="pane-heading">
+            <div>
+              <span class="eyebrow">Drafts</span>
+              <h2>稿件生成</h2>
+              <p>基于勾选素材生成草稿，保留人工修改空间。</p>
+            </div>
+          </div>
+          <input type="text" id="draft-topic" placeholder="选题主题，可留空">
+          <textarea id="draft-instruction" placeholder="额外要求，例如：更口语化、加入个人经历、控制在 90 秒。"></textarea>
+          <div class="draft-actions">
+            <button class="btn btn-primary" id="btn-generate-video" type="button">生成视频号稿</button>
+            <button class="btn btn-primary" id="btn-generate-article" type="button">生成公众号稿</button>
+          </div>
+          <div class="draft-list" id="draft-list"></div>
+          <div class="draft-editor" id="draft-editor" hidden>
+            <input type="text" id="draft-title-editor" placeholder="稿件标题">
+            <textarea id="draft-content-editor" placeholder="稿件正文"></textarea>
+            <div class="draft-actions">
+              <button class="btn btn-primary" id="btn-save-draft" type="button">保存草稿</button>
+              <button class="btn btn-secondary" id="btn-export-draft" type="button">导出草稿到 Obsidian</button>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
 
-    <!-- ============ NOTE EDITOR MODAL ============ -->
+    <div id="selection-toolbar" class="selection-toolbar" hidden>
+      <button class="btn-highlight swatch-yellow" data-color="yellow" title="黄色高亮" aria-label="黄色高亮" type="button"></button>
+      <button class="btn-highlight swatch-green" data-color="green" title="绿色高亮" aria-label="绿色高亮" type="button"></button>
+      <button class="btn-highlight swatch-blue" data-color="blue" title="蓝色高亮" aria-label="蓝色高亮" type="button"></button>
+      <button class="btn-highlight swatch-pink" data-color="pink" title="粉色高亮" aria-label="粉色高亮" type="button"></button>
+      <button class="btn-note" id="btn-add-note" title="写感悟" type="button">笔记</button>
+    </div>
+
     <div id="note-modal" class="modal-overlay" hidden>
       <div class="modal-card">
         <div class="modal-header">
-          <h3>编辑笔记</h3>
-          <button class="btn btn-icon modal-close" id="btn-close-modal">✕</button>
+          <h3>写感悟</h3>
+          <button class="btn btn-ghost modal-close" id="btn-close-modal" type="button">关闭</button>
         </div>
         <div class="modal-body">
           <div class="highlight-preview" id="note-preview-text"></div>
-          <textarea id="note-textarea" placeholder="写下你的想法…" rows="4"></textarea>
+          <textarea id="note-textarea" placeholder="写下你的想法" rows="5"></textarea>
           <div class="tag-input-area">
-            <label class="tag-label">标签（逗号分隔）</label>
-            <input type="text" id="tag-input" placeholder="金句, 反思, 哲学…">
+            <label class="tag-label">标签，逗号分隔</label>
+            <input type="text" id="tag-input" placeholder="金句, 反思, 哲学">
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-danger btn-sm" id="btn-delete-note" hidden>删除</button>
-          <button class="btn btn-primary" id="btn-save-note">保存</button>
+          <button class="btn btn-danger btn-sm" id="btn-delete-note" hidden type="button">删除</button>
+          <button class="btn btn-primary" id="btn-save-note" type="button">保存</button>
         </div>
       </div>
     </div>
 
-    <!-- ============ TOAST NOTIFICATION ============ -->
     <div id="toast" class="toast" hidden></div>
-
   </div>
 
   <script src="app.js"></script>

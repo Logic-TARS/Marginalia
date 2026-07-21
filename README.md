@@ -14,7 +14,7 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-API 运行在 `http://localhost:8000`，自动生成文档在 `/docs`。
+API 运行在 `http://localhost:8720`，自动生成文档在 `/docs`。
 
 ### 2. 打开阅读器
 
@@ -43,7 +43,7 @@ cp .env.example .env
 
 ```bash
 # 从划线生成视频脚本
-curl -X POST http://localhost:8000/api/generate-script \
+curl -X POST http://localhost:8720/api/generate-script \
   -H "Content-Type: application/json" \
   -d '{"highlight_ids": ["uuid1", "uuid2", "uuid3"]}'
 ```

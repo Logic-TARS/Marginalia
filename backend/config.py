@@ -25,6 +25,14 @@ class Settings:
     # CORS
     cors_origins: str = os.getenv("CORS_ORIGINS", "*")
 
+    # OpenAI-compatible LLM endpoint
+    llm_base_url: str = os.getenv("LLM_BASE_URL", "").rstrip("/")
+    llm_api_key: str = os.getenv("LLM_API_KEY", "")
+    llm_model: str = os.getenv("LLM_MODEL", "")
+
+    # Obsidian export
+    obsidian_vault_path: str = os.getenv("OBSIDIAN_VAULT_PATH", "")
+
     @property
     def cors_origin_list(self) -> list[str]:
         if self.cors_origins == "*":
