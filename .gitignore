@@ -29,3 +29,9 @@ node_modules/
 
 # Data
 backend/data/
+
+# Test artifacts
+frontend/test-results/
+
+# Misc
+.omo/
