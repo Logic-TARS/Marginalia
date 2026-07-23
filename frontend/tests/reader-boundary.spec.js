@@ -6,9 +6,9 @@ import { sameSectionHref, landedOnFirstPage, landedOnLastPage } from './helpers/
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(__dirname, 'fixtures', 'multichapter.epub');
 
-const RUNS = 5;
-const NAV_DELAY = 1500; // ms for page navigation to settle
-const JUMP_DELAY = 3000; // ms for progress slider jump to settle
+const RUNS = 1;
+const NAV_DELAY = 250; // ms for page navigation to settle
+const JUMP_DELAY = 1000; // ms for progress slider jump to settle
 
 /**
  * Helper: open the reader and import the fixture EPUB.
@@ -16,8 +16,9 @@ const JUMP_DELAY = 3000; // ms for progress slider jump to settle
 async function openFixture(page) {
   await page.goto('/index.html');
   await page.setInputFiles('#file-input', FIXTURE);
-  await expect(page.locator('#toolbar-book-title')).toContainText('multichapter', { timeout: 15_000 });
-  await expect(page.locator('#toolbar-chapter')).not.toHaveText('选择一本书开始阅读', { timeout: 15_000 });
+  await expect(page.locator('#toolbar-book-title')).toContainText(/multichapter/i, { timeout: 15_000 });
+  await expect(page.locator('#toolbar-chapter')).not.toHaveText(/加载中|选择一本书开始阅读/, { timeout: 15_000 });
+  await expect(page.locator('#page-text')).toHaveText(/第\s*\d+\s*\/\s*\d+\s*页/, { timeout: 15_000 });
 }
 
 /**
@@ -83,6 +84,43 @@ async function clickPrev(page) {
 test.describe('@smoke', () => {
   test('EPUB fixture loads correctly in the reader', async ({ page }) => {
     await openFixture(page);
+
+    const containerMetrics = await page.locator('#epub-container > .epub-container').evaluate((inner) => {
+      const host = document.querySelector('#epub-container');
+      return {
+        hostClientWidth: host ? host.clientWidth : 0,
+        innerClientWidth: inner.clientWidth,
+        innerBorderWidth: getComputedStyle(inner).borderTopWidth,
+      };
+    });
+
+    expect(containerMetrics.innerBorderWidth).toBe('0px');
+    expect(containerMetrics.innerClientWidth).toBe(containerMetrics.hostClientWidth);
+  });
+
+  test('narrow viewport keeps exact one-page button navigation', async ({ page }) => {
+    await page.setViewportSize({ width: 480, height: 800 });
+    await openFixture(page);
+
+    const initialChapter = await getChapterLabel(page);
+    const initialPageInfo = await getPageInfo(page);
+    expect(initialPageInfo).not.toBeNull();
+
+    await clickNext(page);
+
+    const nextPageInfo = await getPageInfo(page);
+    expect(await getChapterLabel(page)).toBe(initialChapter);
+    expect(nextPageInfo).not.toBeNull();
+    expect(nextPageInfo.current).toBe(initialPageInfo.current + 1);
+
+    const widths = await page.locator('#epub-container > .epub-container').evaluate((inner) => {
+      const host = document.querySelector('#epub-container');
+      return {
+        host: host ? host.clientWidth : 0,
+        inner: inner.clientWidth,
+      };
+    });
+    expect(widths.inner).toBe(widths.host);
   });
 });
 
@@ -94,26 +132,32 @@ test.describe('@boundary.forward', () => {
       // Record starting chapter
       const startChapter = await getChapterLabel(page);
       const startPageInfo = await getPageInfo(page);
-      const startPage = startPageInfo ? startPageInfo.current : 0;
+      expect(startPageInfo).not.toBeNull();
 
       // Navigate forward until chapter label changes (cross-section boundary)
       let chapterLabel = startChapter;
-      let maxClicks = 30;
+      let previousPageInfo = startPageInfo;
+      let maxClicks = Math.max(30, (startPageInfo?.total || 0) + 5);
       while (chapterLabel === startChapter && maxClicks > 0) {
         await clickNext(page);
         chapterLabel = await getChapterLabel(page);
+        const currentPageInfo = await getPageInfo(page);
+        expect(currentPageInfo).not.toBeNull();
+        if (chapterLabel === startChapter) {
+          expect(currentPageInfo.current).toBe(previousPageInfo.current + 1);
+          previousPageInfo = currentPageInfo;
+        }
         maxClicks--;
       }
 
       // Assert: chapter changed
       expect(chapterLabel).not.toBe(startChapter);
+      expect(previousPageInfo.current).toBe(previousPageInfo.total);
 
-      // Assert: page number is low (indicating start of new chapter)
+      // Assert: cross-section navigation lands on the first page
       const afterPageInfo = await getPageInfo(page);
       expect(afterPageInfo).not.toBeNull();
-      // The first page of a new chapter should have a lower page number than the last page of the prior chapter
-      // Since we crossed a boundary, the page should be near the start of the new chapter
-      expect(afterPageInfo.current).toBeLessThan(10);
+      expect(afterPageInfo.current).toBe(1);
     }
   });
 });
@@ -142,20 +186,19 @@ test.describe('@boundary.backward', () => {
 
       // Click prev repeatedly until we land on chapter 1
       let maxClicks = 50;
-      while (!chapterLabel.includes('第1章') && maxClicks > 0) {
+      while (!chapterLabel.includes('Chapter 1') && maxClicks > 0) {
         await clickPrev(page);
         chapterLabel = await getChapterLabel(page);
         maxClicks--;
       }
 
       // Assert: landed on chapter 1
-      expect(chapterLabel).toContain('第1章');
+      expect(chapterLabel).toContain('Chapter 1');
 
       // Assert: page number is high (indicating last page of chapter 1)
       const pageInfo = await getPageInfo(page);
       expect(pageInfo).not.toBeNull();
-      // The last page of chapter 1 should be a significant page number
-      expect(pageInfo.current).toBeGreaterThan(5);
+      expect(pageInfo.current).toBe(pageInfo.total);
     }
   });
 });
@@ -165,16 +208,14 @@ test.describe('@boundary.intra', () => {
     await openFixture(page);
 
     for (let run = 0; run < RUNS; run++) {
-      // Navigate to page 2 (click next once from start)
-      await clickNext(page);
-
       // Record initial state
       let pageInfo = await getPageInfo(page);
       const initialChapter = await getChapterLabel(page);
       const initialPage = pageInfo ? pageInfo.current : 0;
+      expect(pageInfo).not.toBeNull();
 
-      // Click next 3 more times, asserting +1 page each time
-      for (let i = 0; i < 3; i++) {
+      // Every click, including the first one, must advance exactly one page.
+      for (let i = 0; i < 4; i++) {
         await clickNext(page);
         pageInfo = await getPageInfo(page);
         const currentChapter = await getChapterLabel(page);

@@ -2,7 +2,7 @@
  * Marginalia Service Worker
  * Cache-first for app shell, network-first for API calls
  */
-const CACHE_NAME = 'marginalia-v4';
+const CACHE_NAME = 'marginalia-v5';
 
 const APP_SHELL = [
   '.',
