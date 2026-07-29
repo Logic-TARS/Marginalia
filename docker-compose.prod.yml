@@ -1,0 +1,56 @@
+name: marginalia-production
+
+services:
+  api:
+    image: marginalia-api:production
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.prod
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      # Reach the Windows-native Ollama service without exposing the API itself.
+      EMBEDDING_BASE_URL: http://host.docker.internal:11434/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Reuse the current host data directory; application source stays in the image.
+      - ./backend/data:/app/data
+    expose:
+      - "8720"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8720/health', timeout=5).read()"
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
+    networks:
+      - app
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.7.2
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --metrics
+      - 0.0.0.0:2000
+      - run
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - app
+      - tunnel
+
+networks:
+  app:
+    internal: true
+  tunnel:

@@ -8,14 +8,13 @@ services:
     volumes:
       - ./backend:/app          # Hot reload in dev
       - marginalia_data:/app/data
-    environment:
-      - FEISHU_WEBHOOK_URL=${FEISHU_WEBHOOK_URL:-}
-      - FEISHU_APP_ID=${FEISHU_APP_ID:-}
-      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET:-}
-      - FEISHU_BASE_TOKEN=${FEISHU_BASE_TOKEN:-}
-      - FEISHU_TABLE_ID=${FEISHU_TABLE_ID:-}
     env_file:
       - .env
+    environment:
+      # Reuse the Windows-native Ollama service from inside the container.
+      EMBEDDING_BASE_URL: http://host.docker.internal:11434/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: uvicorn main:app --host 0.0.0.0 --port 8720 --reload
 
 volumes:

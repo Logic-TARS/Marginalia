@@ -1,22 +1,22 @@
 {
-  "name": "Marginalia — 电子书划线笔记",
+  "name": "Marginalia - 电子书划线笔记",
   "short_name": "Marginalia",
-  "description": "EPUB 阅读器，支持划线、笔记，同步到飞书",
+  "description": "EPUB 阅读器，支持划线、笔记、本地同步和创作导出",
   "start_url": ".",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#faf9f8",
-  "theme_color": "#4a6cf7",
+  "background_color": "#f4f1ea",
+  "theme_color": "#2f604a",
   "lang": "zh-CN",
   "icons": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='32' fill='%234a6cf7'/><text x='96' y='132' font-size='96' text-anchor='middle' fill='white'>📖</text></svg>",
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='32' fill='%232f604a'/><text x='96' y='125' font-family='Arial' font-size='92' text-anchor='middle' fill='white'>M</text></svg>",
       "sizes": "192x192",
       "type": "image/svg+xml",
       "purpose": "any maskable"
     },
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='80' fill='%234a6cf7'/><text x='256' y='350' font-size='256' text-anchor='middle' fill='white'>📖</text></svg>",
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='80' fill='%232f604a'/><text x='256' y='335' font-family='Arial' font-size='250' text-anchor='middle' fill='white'>M</text></svg>",
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"

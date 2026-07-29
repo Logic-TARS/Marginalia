@@ -2,77 +2,94 @@
 
 ## Overview
 
-Marginalia is an end-to-end pipeline: EPUB highlights → Feishu → short video scripts.
+Marginalia is an end-to-end local reading workflow: EPUB highlights -> backend notes library -> creation outputs.
 
-```
-┌─────────────────┐     ┌──────────────────┐     ┌──────────────┐
-│  Reader PWA     │────▶│  Backend API     │────▶│  Feishu      │
-│  (epub.js)      │     │  (FastAPI)       │     │  Webhook/Bot │
-│                 │     │                  │     │              │
-│  IndexedDB      │     │  SQLite          │     │  Group Chat  │
-│  Highlights     │     │  Highlights      │     │  / Bitable   │
-└─────────────────┘     └────────┬─────────┘     └──────┬───────┘
-                                 │                       │
-                                 ▼                       ▼
-                        ┌──────────────────┐    ┌────────────────┐
-                        │  Video Agent     │◀───│  Automation    │
-                        │  (Python)        │    │  (Future)      │
-                        │                  │    │                │
-                        │  Script Output   │    │  Trigger on    │
-                        │  Hook/Body/CTA   │    │  new record    │
-                        └──────────────────┘    └────────────────┘
+```text
+┌─────────────────┐     ┌──────────────────┐
+│  Reader PWA     │────▶│  Backend API     │
+│  (epub.js)      │     │  (FastAPI)       │
+│                 │     │                  │
+│  IndexedDB      │     │  SQLite          │
+│  Highlights     │     │  Notes + Drafts  │
+└─────────────────┘     └────────┬─────────┘
+                                 │
+                ┌────────────────┴────────────────┐
+                ▼                                 ▼
+       ┌──────────────────┐              ┌────────────────┐
+       │  Creation Agent  │              │  Obsidian      │
+       │  Rules + LLM     │              │  Markdown      │
+       │                  │              │  Export        │
+       │  Scripts/Drafts  │              │                │
+       └──────────────────┘              └────────────────┘
 ```
 
 ## Components
 
 ### 1. Reader PWA (`frontend/`)
-- **Stack**: Vanilla HTML/JS/CSS + epub.js (CDN)
-- **Storage**: IndexedDB (books + highlights)
-- **Key features**: EPUB import, CFI-based highlighting, inline notes, manual sync
-- **Offline**: Service worker caches app shell + epub.js; highlights work offline
+
+- **Stack**: Vanilla HTML/JS/CSS + epub.js
+- **Storage**: IndexedDB (`books`, `highlights`, `bookmarks`, `sync_queue`) as an offline cache
+- **Key features**: server-first EPUB import, CFI-based highlighting, inline notes, tags, search, bookmarks, AI Q&A, cross-device sync
+- **Offline**: Service worker caches the app shell and server EPUB responses; mutations queue locally until the server is reachable
 
 ### 2. Backend API (`backend/`)
+
 - **Stack**: Python FastAPI + aiosqlite
 - **Endpoints**:
   - `POST /api/highlights` — receive highlights from reader
-  - `GET /api/highlights` — list highlights (for debugging/agent consumption)
+  - `GET /api/highlights` — list highlights
+  - `GET /api/materials` — filter creation materials
+  - `POST /api/books/ask` — answer questions using local reading context
+  - `POST /api/knowledge/books/upload` — upload and queue a local EPUB index
+  - `GET /api/knowledge/books/{id}` — inspect persisted index state
+  - `GET/POST /api/knowledge/books/{id}/conversations` — manage per-book chats
+  - `POST /api/knowledge/conversations/{id}/messages/stream` — stream grounded answers
+  - `POST /api/generate-script` — generate a rule-based video script from highlights
+  - `POST /api/drafts/generate` and `/api/drafts/*` — generate and manage LLM drafts
+  - `POST /api/obsidian/export` — export book materials or drafts
+  - `POST /api/books/upload` — validate, deduplicate, persist, and index an EPUB
+  - `GET /api/books` and `GET /api/books/{id}/file` — list and read canonical server EPUBs
+  - `GET/POST /api/books/{id}/sync` — pull state or apply idempotent progress/bookmark/highlight operations
+  - `DELETE /api/books/{id}` — delete the EPUB, reader state, and AI data on every device
   - `GET /health` — health check
-  - `POST /api/generate-script` — generate video script from highlights
 - **Database**: SQLite (embedded, zero-config)
 
-### 3. Feishu Integration (`backend/feishu.py`)
-- **MVP**: Custom bot webhook → HTTP POST to group chat
-- **Message format**: Interactive card (v2) with highlight text, notes, tags
-- **Fire-and-forget**: Doesn't block the sync response
-- **Future**: Bitable structured storage via lark-cli
+### 3. Creation Agent (`backend/agent.py`, `backend/llm.py`)
 
-### 4. Video Agent (`backend/agent.py`)
-- **Approach**: "Editing-first, shooting-second"
-- **Output**: Hook (3-5s) + Body (40-55s) + CTA (5-10s)
-- **Input**: 3-5 highlights with notes/tags
-- **Duration**: Estimated from Chinese speech rate (~4 chars/sec)
+- **Rule engine**: Produces a short video structure with hook, body, CTA, and duration estimate.
+- **LLM draft generation**: Produces video or article drafts from selected highlights when an OpenAI-compatible endpoint is configured.
+- **Book Q&A**: Uploads EPUBs into a persistent SQLite knowledge base, combines
+  embedding similarity with lexical retrieval, streams grounded answers, stores
+  per-book conversations, and returns navigable source citations.
+
+### 4. Obsidian Export (`backend/obsidian.py`)
+
+- Exports book materials and generated drafts as Markdown files.
+- Requires `OBSIDIAN_VAULT_PATH` to point at the target vault.
 
 ## Data Flow
 
-```
-1. User imports EPUB → file_blob stored in IndexedDB
-2. User reads, selects text → epub.js fires "selected" event with CFI
-3. User clicks highlight color → rendition.annotations.highlight() + IndexedDB write
-4. User clicks "Sync" → batch POST to /api/highlights
-5. Backend saves to SQLite → fire-and-forget POST to Feishu webhook
-6. Feishu card message appears in group chat
-7. User triggers POST /api/generate-script → agent.py generates video outline
-8. Script ready for voiceover recording + video editing
-```
+1. User imports EPUB -> backend stores a canonical hash-deduplicated copy; the importing browser keeps an offline copy.
+2. User reads and selects text -> epub.js returns a CFI range.
+3. User picks a highlight color -> the annotation is rendered and saved in IndexedDB.
+4. User edits notes/tags -> local highlight material is updated.
+5. Reader changes enter an IndexedDB operation queue and automatically sync through `POST /api/books/{id}/sync`.
+6. Backend refreshes `backend/data/notes.json` from SQLite.
+7. User generates scripts/drafts or exports materials to Obsidian.
+8. EPUB imports are hashed and queued for background indexing without blocking reading.
+9. Questions retrieve relevant book chunks and notes, then stream a source-grounded answer.
+10. Conversations and citation snapshots remain available after reopening the book.
 
 ## Key Design Decisions
 
 | Decision | Why |
 |----------|-----|
-| IndexedDB over localStorage | EPUB blobs can be 10MB+; need indexed queries |
-| epub.js CDN over npm | No build step; SW caches for offline |
+| IndexedDB over localStorage | EPUB blobs can be 10MB+; notes need indexed local queries |
+| epub.js with a static frontend | No frontend build step; easy local deployment |
 | SQLite over PostgreSQL | Zero setup for MVP; embedded in process |
-| Webhook over Bitable | Immediate validation; no OAuth setup needed |
-| Manual sync over auto | User control; clear data boundary |
-| Fire-and-forget Feishu | Sync response stays fast; Feishu failures don't block |
-| No auth | MVP scope; add API key for deployment |
+| Idempotent auto-sync with a local queue | Progress, bookmarks, highlights, and notes survive offline use and converge across devices |
+| JSON notes export | Simple machine-readable bridge for local workflows |
+| Backend serves frontend | One local server and same-origin API calls |
+| No auth | MVP scope; add API key before exposed deployment |
+| SQLite vectors over a vector service | Keeps a single-user deployment zero-infrastructure |
+| Persistent index queue | Interrupted EPUB indexing can resume after a backend restart |

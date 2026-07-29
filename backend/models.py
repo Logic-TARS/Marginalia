@@ -22,13 +22,13 @@ class HighlightCreate(BaseModel):
     created_at: Optional[datetime] = None
     progress_percent: float = 0.0
     status: str = "raw"
+    knowledge_book_id: Optional[str] = None
 
 
 class Highlight(HighlightCreate):
     """Full highlight record with server-generated fields."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     received_at: datetime = Field(default_factory=datetime.utcnow)
-    synced_to_feishu: bool = False
 
 
 class SyncRequest(BaseModel):
@@ -43,6 +43,21 @@ class SyncResponse(BaseModel):
     items: list[dict] = Field(default_factory=list)
 
 
+class ReaderSyncOperation(BaseModel):
+    """One idempotent cross-device reader mutation."""
+
+    op_id: str
+    type: str
+    entity_id: str = ""
+    payload: dict = Field(default_factory=dict)
+
+
+class BookSyncRequest(BaseModel):
+    """Pending reader mutations for one canonical server book."""
+
+    operations: list[ReaderSyncOperation] = Field(default_factory=list)
+
+
 class HighlightUpdate(BaseModel):
     """Editable highlight fields."""
     book_title: Optional[str] = None
@@ -55,6 +70,7 @@ class HighlightUpdate(BaseModel):
     color: Optional[str] = None
     progress_percent: Optional[float] = None
     status: Optional[str] = None
+    knowledge_book_id: Optional[str] = None
 
 
 class HighlightDelete(BaseModel):
@@ -90,6 +106,8 @@ class BookQAHighlight(BaseModel):
     tags: list[str] = Field(default_factory=list)
     chapter: str = ""
     progress_percent: float = 0.0
+    id: str = ""
+    cfi: str = ""
 
 
 class BookQARequest(BaseModel):
@@ -100,11 +118,32 @@ class BookQARequest(BaseModel):
     chapter: str = ""
     progress_percent: float = 0.0
     highlights: list[BookQAHighlight] = Field(default_factory=list)
+    knowledge_book_id: Optional[str] = None
+    conversation_id: Optional[str] = None
 
 
 class BookQAResponse(BaseModel):
     """Answer returned by the book understanding assistant."""
     answer: str
+    citations: list[dict] = Field(default_factory=list)
+    conversation_id: Optional[str] = None
+
+
+class ReaderLocation(BaseModel):
+    chapter: str = ""
+    href: str = ""
+    cfi: str = ""
+    progress_percent: float = 0.0
+
+
+class QAStreamRequest(BaseModel):
+    content: str
+    current_location: ReaderLocation = Field(default_factory=ReaderLocation)
+    local_highlights: list[BookQAHighlight] = Field(default_factory=list)
+
+
+class ConversationCreate(BaseModel):
+    title: str = ""
 
 
 class ObsidianExportRequest(BaseModel):

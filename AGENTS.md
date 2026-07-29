@@ -4,10 +4,10 @@
 
 Marginalia is a small FastAPI plus static PWA project.
 
-- `backend/` contains the Python API, persistence, Feishu integration, and script agent logic. `main.py` defines routes, `database.py` handles SQLite access, `models.py` owns Pydantic schemas, and `config.py` reads environment settings.
+- `backend/` contains the Python API, persistence, book Q&A, Obsidian export, and script agent logic. `main.py` defines routes, `database.py` handles SQLite access, `models.py` owns Pydantic schemas, and `config.py` reads environment settings.
 - `frontend/` contains the browser reader PWA: `index.html`, `style.css`, `app.js`, `sw.js`, and `manifest.json`.
-- `docs/` stores architecture and Feishu setup notes.
-- `scripts/` contains utility scripts such as Feishu-to-agent workflows.
+- `docs/` stores architecture notes.
+- `scripts/` contains utility scripts.
 - Runtime data belongs under `backend/data/` and is ignored by Git.
 
 ## Build, Test, and Development Commands
@@ -32,4 +32,4 @@ This checkout does not include Git history, so no repository-specific commit con
 
 ## Security & Configuration Tips
 
-Copy `.env.example` to `.env` for local secrets. Do not commit `.env`, Feishu webhook URLs, app secrets, generated SQLite databases, EPUB files, or local CodeGraph database contents.
+Copy `.env.example` to `.env` for local secrets. Do not commit `.env`, app secrets, generated SQLite databases, EPUB files, or local CodeGraph database contents.

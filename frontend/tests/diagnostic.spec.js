@@ -19,7 +19,7 @@ test.describe('@probe', () => {
     await page.setInputFiles('#file-input', FIXTURE);
 
     // Wait for book to load
-    await expect(page.locator('#toolbar-book-title')).toContainText('multichapter', { timeout: 20_000 });
+    await expect(page.locator('#toolbar-book-title')).toContainText(/multichapter/i, { timeout: 20_000 });
 
     // Wait for chapter to load (relocated fired at least once)
     await page.waitForFunction(() => {
@@ -63,8 +63,8 @@ test.describe('@probe', () => {
       console.log('No probe dumps captured — relocated may not fire in headless Chrome');
     }
 
-    // Soft assertion: don't fail the test if no dumps (this is expected in headless)
-    // The evidence file is still written for analysis
-    expect(dumps).not.toBeNull();
+    // Headless Chrome can miss relocated timing dumps; the useful contract is
+    // that this diagnostic always writes an evidence file for later analysis.
+    expect(fs.existsSync(EVIDENCE_PATH)).toBe(true);
   });
 });

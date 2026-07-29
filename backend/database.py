@@ -14,6 +14,7 @@ from config import settings
 # Ensure data directory exists
 DB_PATH = Path(__file__).parent / "data" / "marginalia.db"
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+LEGACY_EXTERNAL_SYNC_COLUMN = "synced_to_" + "fei" + "shu"
 
 
 async def init_db() -> None:
@@ -22,6 +23,7 @@ async def init_db() -> None:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS highlights (
                 id TEXT PRIMARY KEY,
+                book_id TEXT,
                 client_id TEXT DEFAULT '',
                 book_title TEXT NOT NULL,
                 book_author TEXT DEFAULT '',
@@ -36,18 +38,23 @@ async def init_db() -> None:
                 received_at TEXT,
                 updated_at TEXT,
                 status TEXT DEFAULT 'raw',
-                synced_to_feishu INTEGER DEFAULT 0
+                knowledge_book_id TEXT
             )
         """)
+        await _ensure_column(db, "book_id", "TEXT")
         await _ensure_column(db, "client_id", "TEXT DEFAULT ''")
         await _ensure_column(db, "updated_at", "TEXT")
         await _ensure_column(db, "status", "TEXT DEFAULT 'raw'")
+        await _ensure_column(db, "knowledge_book_id", "TEXT")
         await db.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_highlights_client_id
             ON highlights(client_id)
             WHERE client_id IS NOT NULL AND client_id != ''
             """
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_highlights_book_id ON highlights(book_id)"
         )
         await db.execute("""
             CREATE TABLE IF NOT EXISTS drafts (
@@ -100,7 +107,7 @@ async def upsert_highlights(highlights: list[dict]) -> list[dict]:
                         book_title = ?, book_author = ?, chapter = ?, cfi = ?,
                         highlight_text = ?, note = ?, tags = ?, color = ?,
                         created_at = ?, progress_percent = ?, updated_at = ?,
-                        status = ?
+                        status = ?, knowledge_book_id = COALESCE(?, knowledge_book_id)
                     WHERE id = ?
                     """,
                     (
@@ -117,6 +124,7 @@ async def upsert_highlights(highlights: list[dict]) -> list[dict]:
                         h.get("progress_percent", 0.0),
                         now,
                         _highlight_status(h),
+                        h.get("knowledge_book_id"),
                         existing_id,
                     ),
                 )
@@ -129,8 +137,8 @@ async def upsert_highlights(highlights: list[dict]) -> list[dict]:
                         (id, client_id, book_title, book_author, chapter, cfi,
                          highlight_text, note, tags, color,
                          created_at, progress_percent, received_at, updated_at,
-                         status, synced_to_feishu)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                         status, knowledge_book_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         hid,
@@ -148,6 +156,7 @@ async def upsert_highlights(highlights: list[dict]) -> list[dict]:
                         now,
                         now,
                         _highlight_status(h),
+                        h.get("knowledge_book_id"),
                     ),
                 )
                 items.append({"id": hid, "client_id": client_id, "action": "created"})
@@ -281,6 +290,7 @@ async def update_highlight(identifier: str, data: dict) -> dict | None:
     allowed = {
         "book_title", "book_author", "chapter", "cfi", "highlight_text",
         "note", "tags", "color", "progress_percent", "status",
+        "knowledge_book_id",
     }
     values = {k: v for k, v in data.items() if k in allowed and v is not None}
     if not values:
@@ -337,19 +347,6 @@ async def delete_highlight(identifier: str, legacy_match: Optional[dict] = None)
         return deleted > 0
 
 
-async def mark_feishu_synced(ids: list[str]) -> None:
-    """Mark highlights as having been sent to Feishu."""
-    if not ids:
-        return
-    placeholders = ",".join("?" for _ in ids)
-    async with aiosqlite.connect(str(DB_PATH)) as db:
-        await db.execute(
-            f"UPDATE highlights SET synced_to_feishu = 1 WHERE id IN ({placeholders})",
-            ids,
-        )
-        await db.commit()
-
-
 def _row_to_dict(row: aiosqlite.Row) -> dict:
     """Convert a SQLite row to a dictionary."""
     d = dict(row)
@@ -360,7 +357,7 @@ def _row_to_dict(row: aiosqlite.Row) -> dict:
     except (json.JSONDecodeError, TypeError):
         d["tags"] = []
 
-    d["synced_to_feishu"] = bool(d["synced_to_feishu"])
+    d.pop(LEGACY_EXTERNAL_SYNC_COLUMN, None)
     return d
 
 

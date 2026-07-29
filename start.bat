@@ -1,10 +1,11 @@
 @echo off
-setlocal EnableExtensions EnableDelayedExpansion
+setlocal EnableExtensions
 title Marginalia
 
-set "DEFAULT_PORT=8720"
-set "PORT=%DEFAULT_PORT%"
-set "FALLBACK_PORTS=8721 8722 8723 8724 8725"
+set "PROJECT_ROOT=%~dp0"
+set "VENV_DIR=%PROJECT_ROOT%.venv"
+set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
+set "PORT=8720"
 
 echo.
 echo ================================
@@ -12,87 +13,63 @@ echo   Marginalia - EPUB Reader
 echo ================================
 echo.
 
-:: Check Python
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERROR] Python not found. Please install Python 3.12+
-    echo         https://www.python.org/downloads/
-    pause
-    exit /b 1
-)
-
-:: Switch to backend directory
-cd /d "%~dp0backend"
-
-:: Copy .env if not exists
-if not exist ".env" (
-    echo [INFO] Creating .env from .env.example...
-    copy "..\.env.example" ".env" >nul
-)
-
-:: Check and install dependencies
-echo [INFO] Checking dependencies...
-pip show fastapi >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [INFO] Installing dependencies, please wait...
-    pip install -r requirements.txt -q
-    if %errorlevel% neq 0 (
-        echo [ERROR] Failed to install dependencies
+if not exist "%VENV_PYTHON%" (
+    echo [INFO] Creating project virtual environment...
+    set "BOOTSTRAP_PYTHON=python"
+    python -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)" >nul 2>&1
+    if errorlevel 1 (
+        py -3.11 -c "import sys" >nul 2>&1
+        if errorlevel 1 (
+            echo [ERROR] Python 3.11 is required to create .venv.
+            pause
+            exit /b 1
+        )
+        set "BOOTSTRAP_PYTHON=py -3.11"
+    )
+    %BOOTSTRAP_PYTHON% -m venv "%VENV_DIR%"
+    if errorlevel 1 (
+        echo [ERROR] Failed to create .venv.
         pause
         exit /b 1
     )
-    echo [INFO] Dependencies installed
 )
 
-:: Pick an available port, or reuse an already running server.
-call :is_port_busy %PORT%
-if "%PORT_BUSY%"=="1" (
-    call :is_server_ready %PORT%
-    if "!SERVER_READY!"=="1" (
-        echo [INFO] Marginalia is already running: http://localhost:%PORT%
-        echo [INFO] Opening browser...
-        start "" "http://localhost:%PORT%"
-        goto :done
-    )
-
-    echo [WARN] Port %PORT% is already in use. Looking for a fallback port...
-    set "PORT="
-    for %%P in (%FALLBACK_PORTS%) do (
-        call :is_port_busy %%P
-        if "!PORT_BUSY!"=="0" if not defined PORT set "PORT=%%P"
-    )
-)
-
-if not defined PORT (
-    echo [ERROR] No available port found. Tried %DEFAULT_PORT% %FALLBACK_PORTS%
+"%VENV_PYTHON%" -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] .venv must use Python 3.11. Remove it manually and run this script again.
     pause
     exit /b 1
 )
 
-:: Open browser
-echo [INFO] Opening browser...
-start "" "http://localhost:%PORT%"
+if not exist "%PROJECT_ROOT%.env" (
+    echo [INFO] Creating .env from .env.example...
+    copy "%PROJECT_ROOT%.env.example" "%PROJECT_ROOT%.env" >nul
+)
 
-:: Start server
-echo.
-echo [INFO] Starting server: http://localhost:%PORT%
-echo [INFO] Press Ctrl+C to stop
-echo.
+echo [INFO] Checking isolated dependencies...
+"%VENV_PYTHON%" -c "import fastapi, ebooklib, bs4, multipart, pytest" >nul 2>&1
+if errorlevel 1 (
+    echo [INFO] Installing dependencies into .venv...
+    "%VENV_PYTHON%" -m pip install -r "%PROJECT_ROOT%backend\requirements.txt"
+    if errorlevel 1 (
+        echo [ERROR] Failed to install dependencies into .venv.
+        pause
+        exit /b 1
+    )
+)
 
-python -m uvicorn main:app --host 127.0.0.1 --port %PORT% --reload
+powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" >nul 2>&1
+if not errorlevel 1 (
+    echo [ERROR] Port %PORT% is already in use. Stop the existing service first.
+    pause
+    exit /b 1
+)
 
-:done
+cd /d "%PROJECT_ROOT%backend"
+echo [INFO] Python: %VENV_PYTHON%
+echo [INFO] Starting server: http://127.0.0.1:%PORT%
+start "" "http://127.0.0.1:%PORT%"
+"%VENV_PYTHON%" -m uvicorn main:app --host 127.0.0.1 --port %PORT%
+
 pause
-exit /b 0
-
-:is_port_busy
-set "PORT_BUSY=0"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Get-NetTCPConnection -LocalPort %~1 -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" >nul 2>&1
-if %errorlevel% equ 0 set "PORT_BUSY=1"
-exit /b 0
-
-:is_server_ready
-set "SERVER_READY=0"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $response = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:%~1/' -TimeoutSec 3; if ($response.Content -like '*Marginalia*') { exit 0 } } catch { }; exit 1" >nul 2>&1
-if %errorlevel% equ 0 set "SERVER_READY=1"
-exit /b 0
+exit /b %errorlevel%

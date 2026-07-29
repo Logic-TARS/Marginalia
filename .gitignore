@@ -9,6 +9,10 @@ venv/
 # Environment
 .env
 .env.local
+.env.production
+.env.production.local
+cloudflared/*.json
+cloudflared/*.pem
 
 # IDE
 .vscode/
@@ -31,7 +35,7 @@ node_modules/
 backend/data/
 
 # Test artifacts
-frontend/test-results/
+test-results/
 
 # Misc
 .omo/
