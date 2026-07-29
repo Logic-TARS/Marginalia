@@ -2,13 +2,13 @@
  * Marginalia Service Worker
  * Cache-first for app shell, network-first for API calls
  */
-const CACHE_NAME = 'marginalia-v5';
+const CACHE_NAME = 'marginalia-v24';
 
 const APP_SHELL = [
   '.',
   'index.html',
-  'app.js',
-  'style.css',
+  'app.js?v=24',
+  'style.css?v=24',
   'manifest.json',
   'jszip.min.js',
   'epub.min.js',
@@ -49,12 +49,26 @@ function cacheFirst(request) {
   });
 }
 
+function networkFirst(request) {
+  return fetch(request).then((response) => {
+    if (request.method === 'GET' && response.status === 200) {
+      const clone = response.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+    }
+    return response;
+  }).catch(() => caches.match(request));
+}
+
 // Fetch: cache-first for app shell/books, network-first for API data
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
   // Server-side EPUB files are static and expensive over remote links.
-  if (event.request.method === 'GET' && url.pathname.startsWith('/api/books/')) {
+  if (
+    event.request.method === 'GET' &&
+    url.pathname.startsWith('/api/books/') &&
+    (url.pathname.endsWith('/file') || url.pathname.toLowerCase().endsWith('.epub'))
+  ) {
     event.respondWith(cacheFirst(event.request));
     return;
   }
@@ -72,7 +86,23 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Everything else: cache-first, fallback to network
+  // Prefer fresh application code online so remote devices do not remain on
+  // an old import flow after a deployment.
+  if (
+    event.request.mode === 'navigate' ||
+    url.pathname.endsWith('/index.html') ||
+    url.pathname.endsWith('/app.js') ||
+    url.pathname.endsWith('/style.css')
+  ) {
+    event.respondWith(
+      networkFirst(event.request).then((response) => (
+        response || caches.match('index.html')
+      ))
+    );
+    return;
+  }
+
+  // Vendored libraries and other static assets remain cache-first.
   event.respondWith(
     cacheFirst(event.request).catch(() => {
         // Offline fallback for navigation

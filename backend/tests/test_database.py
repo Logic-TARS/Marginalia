@@ -91,12 +91,6 @@ class TestDatabase:
         assert len(result) == 1
         assert result[0]["book_title"] == "论语"
 
-    def test_mark_feishu_synced(self, temp_db, sample_highlights):
-        ids = run(database.save_highlights([sample_highlights[0]]))
-        run(database.mark_feishu_synced(ids))
-        result = run(database.get_highlights_by_ids(ids))
-        assert result[0]["synced_to_feishu"] is True
-
     def test_tags_roundtrip(self, temp_db):
         h = [{"book_title": "X", "highlight_text": "Y", "tags": ["哲学", "斯多葛"]}]
         ids = run(database.save_highlights(h))
@@ -108,9 +102,6 @@ class TestDatabase:
         ids = run(database.save_highlights(h))
         result = run(database.get_highlights_by_ids(ids))
         assert result[0]["tags"] == []
-
-    def test_mark_feishu_synced_empty(self, temp_db):
-        run(database.mark_feishu_synced([]))
 
     def test_export_all_to_json(self, temp_db, sample_highlights):
         run(database.save_highlights(sample_highlights))

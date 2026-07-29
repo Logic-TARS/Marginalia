@@ -1,0 +1,334 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-25T03:53:14.8532238Z",
+  "title": "Design System: Marginalia",
+  "extensions": {
+    "colorMeta": {
+      "canvas": {
+        "role": "neutral",
+        "displayName": "宣纸米白",
+        "canonical": "#f4f1ea",
+        "tonalRamp": ["#262521", "#4c4a45", "#77736c", "#aaa59d", "#d0cbc3", "#e2ded7", "#f4f1ea", "#fcfbf8"]
+      },
+      "canvas-ink": {
+        "role": "neutral",
+        "displayName": "纸纹深米",
+        "canonical": "#ebe4d8",
+        "tonalRamp": ["#25231f", "#4a463f", "#746e65", "#a69e92", "#cbc3b7", "#ddd5ca", "#ebe4d8", "#faf7f2"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "温白纸面",
+        "canonical": "#fffdf8",
+        "tonalRamp": ["#282724", "#504e4a", "#7f7c76", "#b3afa8", "#d8d4ce", "#ebe8e2", "#fffdf8", "#fffefa"]
+      },
+      "surface-raised": {
+        "role": "neutral",
+        "displayName": "抬升白纸",
+        "canonical": "#ffffff",
+        "tonalRamp": ["#262626", "#4d4d4d", "#737373", "#999999", "#bfbfbf", "#d9d9d9", "#ededed", "#ffffff"]
+      },
+      "surface-muted": {
+        "role": "neutral",
+        "displayName": "柔和纸面",
+        "canonical": "#f8f5ee",
+        "tonalRamp": ["#272622", "#4e4c47", "#797670", "#aca8a1", "#d2cec7", "#e6e2db", "#f8f5ee", "#fdfcf9"]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "暖象牙纸",
+        "canonical": "#fffaf0",
+        "tonalRamp": ["#282621", "#504c43", "#7f786a", "#b3aa98", "#d8cfbf", "#ebe3d5", "#fffaf0", "#fffcf7"]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "主墨",
+        "canonical": "#20231f",
+        "tonalRamp": ["#111310", "#20231f", "#383c36", "#5b6158", "#858b81", "#b2b7ae", "#d8dcd5", "#f2f4f1"]
+      },
+      "ink-soft": {
+        "role": "neutral",
+        "displayName": "柔墨",
+        "canonical": "#575c50",
+        "tonalRamp": ["#171a14", "#292d25", "#40463b", "#575c50", "#777d70", "#a0a59a", "#cbd0c6", "#f0f2ed"]
+      },
+      "ink-muted": {
+        "role": "neutral",
+        "displayName": "淡墨",
+        "canonical": "#87897e",
+        "tonalRamp": ["#20221c", "#383a32", "#595b51", "#787a70", "#9a9c92", "#bdbfb7", "#ddddda", "#f5f5f3"]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "亚麻线",
+        "canonical": "#ded6c8",
+        "tonalRamp": ["#24211d", "#49443c", "#716a60", "#9e968a", "#c1b9ad", "#d6cec2", "#e9e3da", "#faf8f4"]
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "深亚麻线",
+        "canonical": "#c8bcaa",
+        "tonalRamp": ["#211e19", "#433d34", "#685f53", "#8f8475", "#b0a493", "#cabfad", "#e2d9cc", "#f7f4ef"]
+      },
+      "pine": {
+        "role": "primary",
+        "displayName": "墨松绿",
+        "canonical": "#2f604a",
+        "tonalRamp": ["#0d1b14", "#153024", "#204735", "#2f604a", "#54806b", "#82a48f", "#b8cabc", "#edf3ef"]
+      },
+      "pine-deep": {
+        "role": "primary",
+        "displayName": "深墨松",
+        "canonical": "#244d3b",
+        "tonalRamp": ["#0b1711", "#11271d", "#19392b", "#244d3b", "#4d725f", "#7b9988", "#b2c3b8", "#edf2ef"]
+      },
+      "pine-soft": {
+        "role": "primary",
+        "displayName": "墨松浅雾",
+        "canonical": "#e5f0e8",
+        "tonalRamp": ["#1b241d", "#35453a", "#587061", "#7f9988", "#a9c1b0", "#c9ddcf", "#e5f0e8", "#f7faf8"]
+      },
+      "antique-gold": {
+        "role": "secondary",
+        "displayName": "旧金",
+        "canonical": "#b8812f",
+        "tonalRamp": ["#271907", "#4b310e", "#714c18", "#956923", "#b8812f", "#d0a35e", "#e5c99a", "#f8eed9"]
+      },
+      "secondary-wash": {
+        "role": "secondary",
+        "displayName": "浅金纸",
+        "canonical": "#fff7e4",
+        "tonalRamp": ["#29251c", "#514a39", "#80755a", "#b4a57f", "#d9cba9", "#eee1c8", "#fff7e4", "#fffcf5"]
+      },
+      "secondary-ink": {
+        "role": "secondary",
+        "displayName": "棕金墨",
+        "canonical": "#7c571c",
+        "tonalRamp": ["#201504", "#3d2908", "#5c3f0f", "#7c571c", "#9e783e", "#bea06e", "#ddcba9", "#f6efe2"]
+      },
+      "danger": {
+        "role": "tertiary",
+        "displayName": "砖红警示",
+        "canonical": "#b34235",
+        "tonalRamp": ["#2a0c08", "#4e1712", "#76231c", "#9d342a", "#b34235", "#cf7368", "#e7aaa3", "#f8e7e4"]
+      },
+      "success": {
+        "role": "tertiary",
+        "displayName": "沉静成功绿",
+        "canonical": "#2d7d4a",
+        "tonalRamp": ["#092112", "#0f3c20", "#195a31", "#267541", "#2d7d4a", "#62a178", "#9bc7a9", "#e6f3e9"]
+      },
+      "highlight-yellow": {
+        "role": "tertiary",
+        "displayName": "柔黄批注",
+        "canonical": "#f6d86f",
+        "tonalRamp": ["#302605", "#5e4c0b", "#8d7318", "#bc9f36", "#d9bd54", "#f0d46a", "#f8e59b", "#fff8dd"]
+      },
+      "highlight-green": {
+        "role": "tertiary",
+        "displayName": "叶绿批注",
+        "canonical": "#9ccc90",
+        "tonalRamp": ["#142513", "#294627", "#426b3d", "#619157", "#7daf72", "#9ccc90", "#c7e0c0", "#eff7ec"]
+      },
+      "highlight-blue": {
+        "role": "tertiary",
+        "displayName": "雾蓝批注",
+        "canonical": "#96c3df",
+        "tonalRamp": ["#10212c", "#213f52", "#3a6078", "#59839f", "#76a3bf", "#96c3df", "#c2deee", "#eff8fc"]
+      },
+      "highlight-pink": {
+        "role": "tertiary",
+        "displayName": "旧粉批注",
+        "canonical": "#e8a3b0",
+        "tonalRamp": ["#2b171b", "#542d35", "#7c4752", "#a56472", "#c98290", "#e8a3b0", "#f2ccd3", "#fbeff1"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "书名页标题",
+        "purpose": "一级页面标题与最重要的阅读语境标题。"
+      },
+      "title": {
+        "displayName": "书目标题",
+        "purpose": "书名、面板标题和重要卡片标题。"
+      },
+      "body": {
+        "displayName": "工具正文",
+        "purpose": "说明、表单、笔记与主要操作文字。"
+      },
+      "label": {
+        "displayName": "索引标签",
+        "purpose": "英文眉题、短元数据和紧凑状态标签。"
+      }
+    },
+    "shadows": [
+      {
+        "name": "paper-rest",
+        "value": "0 1px 2px rgba(55, 45, 31, 0.08)",
+        "purpose": "静止导航、卡片和工作面板的纸面贴合感。"
+      },
+      {
+        "name": "paper-lift",
+        "value": "0 10px 28px rgba(55, 45, 31, 0.12)",
+        "purpose": "悬停卡片和重要状态条的温和抬升。"
+      },
+      {
+        "name": "overlay-focus",
+        "value": "0 22px 60px rgba(55, 45, 31, 0.18)",
+        "purpose": "模态框和 Toast 等真实浮层。"
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-quick",
+        "value": "150ms ease",
+        "purpose": "颜色、边框、背景和阴影的常规状态变化。"
+      },
+      {
+        "name": "press-quick",
+        "value": "120ms ease",
+        "purpose": "按钮位移与选择控件缩放。"
+      },
+      {
+        "name": "progress",
+        "value": "200ms ease",
+        "purpose": "进度条宽度变化。"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "workspace-two-column",
+        "value": "1180px"
+      },
+      {
+        "name": "single-column",
+        "value": "900px"
+      },
+      {
+        "name": "compact-mobile",
+        "value": "560px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "当前区域唯一的主要行动。",
+      "html": "<button class=\"ds-btn-primary\">保存感想</button>",
+      "css": ".ds-btn-primary { min-height: 38px; padding: 9px 14px; border: 1px solid var(--accent, #2f604a); border-radius: 7px; background: var(--accent, #2f604a); color: var(--surface, #fffdf8); font: 500 15px/1 -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif; cursor: pointer; box-shadow: var(--shadow-sm, 0 1px 2px rgba(55,45,31,.08)); transition: transform .12s ease, background .15s ease, box-shadow .15s ease; } .ds-btn-primary:hover { transform: translateY(-1px); background: var(--accent-hover, #244d3b); box-shadow: 0 8px 20px rgba(55,45,31,.12); } .ds-btn-primary:active { transform: translateY(0); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(47,96,74,.18); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "与主行动并列但不争夺注意力的辅助操作。",
+      "html": "<button class=\"ds-btn-secondary\">进入创作</button>",
+      "css": ".ds-btn-secondary { min-height: 38px; padding: 9px 14px; border: 1px solid rgba(184,129,47,.36); border-radius: 7px; background: #fff7e4; color: #7c571c; font: 500 15px/1 -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif; cursor: pointer; box-shadow: var(--shadow-sm, 0 1px 2px rgba(55,45,31,.08)); transition: transform .12s ease, border-color .15s ease, box-shadow .15s ease; } .ds-btn-secondary:hover { transform: translateY(-1px); border-color: var(--gold, #b8812f); box-shadow: 0 8px 20px rgba(55,45,31,.12); } .ds-btn-secondary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(184,129,47,.18); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "工具栏和局部面板中的低权重操作。",
+      "html": "<button class=\"ds-btn-ghost\">收起</button>",
+      "css": ".ds-btn-ghost { min-height: 38px; padding: 9px 14px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ink-soft, #575c50); font: 500 15px/1 -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif; cursor: pointer; transition: background .15s ease, color .15s ease; } .ds-btn-ghost:hover { background: rgba(47,96,74,.08); color: var(--accent, #2f604a); } .ds-btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(47,96,74,.14); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "搜索、筛选和短文本录入的标准字段。",
+      "html": "<input class=\"ds-input\" type=\"search\" placeholder=\"搜索本书…\">",
+      "css": ".ds-input { width: 100%; min-height: 40px; padding: 9px 11px; border: 1px solid var(--line, #ded6c8); border-radius: 8px; background: rgba(255,253,248,.94); color: var(--ink, #20231f); font: 400 15px/1.5 -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif; outline: none; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; } .ds-input:hover { border-color: var(--line-strong, #c8bcaa); } .ds-input:focus { border-color: var(--accent, #2f604a); background: var(--surface-raised, #fff); box-shadow: 0 0 0 3px rgba(47,96,74,.14); }"
+    },
+    {
+      "name": "Segmented Navigation",
+      "kind": "nav",
+      "refersTo": "nav-tab-active",
+      "description": "书库、阅读和创作三个主工作区的切换。",
+      "html": "<nav class=\"ds-nav\" aria-label=\"主导航\"><button class=\"ds-nav-tab ds-nav-tab-active\">书库</button><button class=\"ds-nav-tab\">阅读</button><button class=\"ds-nav-tab\">创作</button></nav>",
+      "css": ".ds-nav { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--line, #ded6c8); border-radius: 8px; background: rgba(239,233,223,.76); } .ds-nav-tab { min-width: 70px; height: 34px; padding: 0 14px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-soft, #575c50); font: 400 15px/1 -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif; cursor: pointer; transition: background .15s ease, color .15s ease, box-shadow .15s ease; } .ds-nav-tab:hover { color: var(--ink, #20231f); background: rgba(255,255,255,.55); } .ds-nav-tab:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(47,96,74,.14); } .ds-nav-tab-active { color: var(--accent, #2f604a); background: var(--surface-raised, #fff); box-shadow: var(--shadow-sm, 0 1px 2px rgba(55,45,31,.08)); }"
+    },
+    {
+      "name": "Note Chip",
+      "kind": "chip",
+      "refersTo": "note-chip",
+      "description": "划线后的短笔记动作或紧凑状态。",
+      "html": "<button class=\"ds-note-chip\">写感想</button>",
+      "css": ".ds-note-chip { height: 24px; padding: 0 9px; border: 1px solid rgba(47,96,74,.34); border-radius: 999px; background: var(--accent-soft, #e5f0e8); color: var(--accent, #2f604a); font: 500 12px/1 -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif; cursor: pointer; transition: background .15s ease, transform .12s ease; } .ds-note-chip:hover { background: #d8eadf; transform: translateY(-1px); } .ds-note-chip:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(47,96,74,.14); }"
+    },
+    {
+      "name": "Book Card",
+      "kind": "card",
+      "description": "书库中的签名组件，把装帧感、书目信息和阅读进度合为一体。",
+      "html": "<article class=\"ds-book-card\"><div class=\"ds-book-cover\">M</div><div class=\"ds-book-info\"><strong class=\"ds-book-title\">书籍标题示例</strong><span class=\"ds-book-author\">作者姓名</span><span class=\"ds-book-meta\">上次阅读 · 42%</span><div class=\"ds-book-progress\"><span></span></div></div></article>",
+      "css": ".ds-book-card { min-height: 170px; display: grid; grid-template-columns: 74px 1fr; gap: 14px; padding: 16px; border: 1px solid rgba(157,142,118,.35); border-radius: 8px; background: linear-gradient(135deg, rgba(255,253,248,.98), rgba(250,244,234,.88)); color: var(--ink, #20231f); box-shadow: var(--shadow-sm, 0 1px 2px rgba(55,45,31,.08)); transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease; } .ds-book-card:hover { transform: translateY(-2px); border-color: rgba(47,96,74,.35); box-shadow: var(--shadow-md, 0 10px 28px rgba(55,45,31,.12)); } .ds-book-card:focus-within { box-shadow: 0 0 0 3px rgba(47,96,74,.14); } .ds-book-cover { width: 74px; height: 104px; display: grid; place-items: center; border-radius: 6px; background: linear-gradient(90deg, rgba(0,0,0,.1) 0 8px, transparent 8px), linear-gradient(145deg, #315c48, #203f34); color: #f8e9c8; font: 700 28px/1 Georgia, serif; box-shadow: inset 0 0 0 1px rgba(255,255,255,.18), 0 10px 18px rgba(38,54,45,.18); } .ds-book-info { min-width: 0; display: flex; flex-direction: column; } .ds-book-title { font: 700 18px/1.35 \"Noto Serif SC\", \"Source Han Serif SC\", \"Songti SC\", Georgia, serif; } .ds-book-author, .ds-book-meta { color: var(--ink-muted, #87897e); font: 400 12px/1.45 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; } .ds-book-author { margin-top: 7px; } .ds-book-meta { margin-top: auto; } .ds-book-progress { height: 5px; margin-top: 10px; overflow: hidden; border-radius: 999px; background: rgba(47,96,74,.12); } .ds-book-progress span { display: block; width: 42%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent, #2f604a), #6c9a63); }"
+    },
+    {
+      "name": "Highlight Picker",
+      "kind": "custom",
+      "description": "文字选择后出现的四色批注工具条。",
+      "html": "<div class=\"ds-highlight-picker\" role=\"toolbar\" aria-label=\"划线颜色\"><button class=\"ds-swatch ds-yellow\" aria-label=\"黄色\"></button><button class=\"ds-swatch ds-green\" aria-label=\"绿色\"></button><button class=\"ds-swatch ds-blue\" aria-label=\"蓝色\"></button><button class=\"ds-swatch ds-pink\" aria-label=\"粉色\"></button></div>",
+      "css": ".ds-highlight-picker { display: inline-flex; gap: 5px; padding: 5px; border: 1px solid rgba(157,142,118,.42); border-radius: 999px; background: rgba(255,253,248,.96); box-shadow: 0 8px 24px rgba(55,45,31,.16); } .ds-swatch { width: 22px; height: 22px; padding: 0; border: 1px solid rgba(48,40,23,.16); border-radius: 999px; cursor: pointer; box-shadow: inset 0 0 0 2px rgba(255,255,255,.46); transition: transform .12s ease, box-shadow .12s ease; } .ds-swatch:hover { transform: scale(1.08); box-shadow: inset 0 0 0 2px rgba(255,255,255,.62), 0 3px 10px rgba(55,45,31,.16); } .ds-swatch:focus-visible { outline: 2px solid var(--accent, #2f604a); outline-offset: 2px; } .ds-yellow { background: var(--yellow, #f6d86f); } .ds-green { background: var(--green, #9ccc90); } .ds-blue { background: var(--blue, #96c3df); } .ds-pink { background: var(--pink, #e8a3b0); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "静谧书斋",
+    "overview": "Marginalia 的界面像一间经过整理的私人书斋：温暖但不怀旧，精致但不炫耀。宣纸米白承载长时间阅读，墨松绿只在需要方向与确认时出现，衬线标题带来书卷气，系统无衬线字体保证工具界面的清晰和效率。\n\n界面以精致克制为原则。层次来自纸张色差、细边框和低对比度环境阴影，而不是强烈玻璃效果或夸张悬浮。阅读内容是视觉中心；控件、状态和创作工具以稳定、安静的方式退居其后。",
+    "keyCharacteristics": [
+      "暖纸色底与深墨色文字形成低刺激、长时间可读的基调。",
+      "墨松绿是稀有而明确的操作与状态信号。",
+      "衬线字体负责阅读气质，无衬线字体负责操作清晰度。",
+      "小圆角、细边框和温和阴影建立克制的层次。",
+      "中文文字优先保持完整、稳定、清楚的排布。"
+    ],
+    "rules": [
+      {
+        "name": "The One Ink Rule",
+        "body": "墨松绿只用于品牌、主要行动、焦点或当前状态；同一视区不要让多个绿色元素同时争夺主导权。",
+        "section": "colors"
+      },
+      {
+        "name": "The Quiet Paper Rule",
+        "body": "大面积背景保持低饱和暖中性色，不使用高饱和科技蓝、夸张渐变或彩色玻璃底。",
+        "section": "colors"
+      },
+      {
+        "name": "The Chinese First Rule",
+        "body": "中文文字不得因固定高度、过窄容器或强制单行而乱码、串行、挤压或被意外截断；仅对可恢复的书名和短元数据使用省略。",
+        "section": "typography"
+      },
+      {
+        "name": "The Two Voices Rule",
+        "body": "衬线用于阅读语境与标题，无衬线用于导航、表单和状态；不要引入第三套装饰字体。",
+        "section": "typography"
+      },
+      {
+        "name": "The Warm Shadow Rule",
+        "body": "阴影使用带棕色的低透明度环境色，不使用冷黑硬阴影或发光描边。",
+        "section": "elevation"
+      },
+      {
+        "name": "The Flat-at-Rest Rule",
+        "body": "普通表面在静止时接近纸面贴合；只有交互响应或真实浮层才能明显抬升。",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** 让宣纸米白、温白纸面和墨色文字承担大部分界面面积。",
+      "**Do** 用墨松绿明确主行动、当前状态和键盘焦点。",
+      "**Do** 通过 8px、12px、16px 的节奏组织局部间距，通过 40px 建立桌面页面留白。",
+      "**Do** 在窄屏把多栏工作区真实重排为单列，并允许中文按钮与状态文字换行。",
+      "**Do** 保持衬线标题与无衬线工具文字的双重声音。"
+    ],
+    "donts": [
+      "**Don't** 使用高饱和科技蓝、大面积玻璃拟态或夸张渐变替代现有纸张与墨色体系。",
+      "**Don't** 使用卡通插画、拟物小物件或装饰图标制造“书卷感”。",
+      "**Don't** 把普通按钮、卡片和输入框全面改成过度圆润的胶囊形。",
+      "**Don't** 用强冷黑阴影、霓虹光晕或多层浮动卡片制造高级感。",
+      "**Don't** 为保持桌面布局而压缩、串行或截断关键中文文字。"
+    ]
+  }
+}

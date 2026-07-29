@@ -1,0 +1,13 @@
+.git
+.codegraph
+.venv
+.pytest_cache
+.env
+.env.*
+backend/data
+backend/tests
+frontend/node_modules
+frontend/test-results
+test-results
+__pycache__
+*.pyc

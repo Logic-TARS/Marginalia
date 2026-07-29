@@ -8,7 +8,7 @@ export default defineConfig({
     viewport: { width: 1000, height: 700 },
   },
   webServer: {
-    command: 'python -m http.server 8099',
+    command: '"..\\.venv\\Scripts\\python.exe" -m http.server 8099',
     port: 8099,
     reuseExistingServer: true,
     cwd: '.',
@@ -16,8 +16,17 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium-stable',
+      testIgnore: /mobile-layout\.spec\.js/,
       use: {
         ...devices['Desktop Chrome'],
+        channel: 'chrome',
+      },
+    },
+    {
+      name: 'mobile-chromium',
+      testMatch: /mobile-layout\.spec\.js/,
+      use: {
+        ...devices['Pixel 5'],
         channel: 'chrome',
       },
     },

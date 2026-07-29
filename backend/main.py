@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from contextlib import asynccontextmanager
 from typing import Optional
 
 from pathlib import Path
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from config import settings
 from database import (
@@ -30,19 +33,22 @@ from database import (
     delete_draft,
 )
 from models import (
+    BookSyncRequest,
     BookQARequest,
     BookQAResponse,
+    ConversationCreate,
     DraftGenerateRequest,
     DraftUpdate,
     HighlightDelete,
     HighlightUpdate,
     ObsidianExportRequest,
+    QAStreamRequest,
     SyncRequest,
     SyncResponse,
     ScriptRequest,
     ScriptResponse,
 )
-from books_api import list_books, serve_book
+from books_api import serve_book
 from database import export_all_to_json
 
 logging.basicConfig(level=logging.INFO)
@@ -53,18 +59,29 @@ logger = logging.getLogger("marginalia")
 async def lifespan(app: FastAPI):
     """Startup/shutdown lifecycle."""
     await init_db()
-    logger.info("Database initialized")
-    yield
+    from knowledge import init_knowledge_db, start_index_worker, stop_index_worker
+
+    await init_knowledge_db()
+    from library import init_library_db, reconcile_legacy_books
+
+    await init_library_db()
+    await reconcile_legacy_books()
+    await start_index_worker()
+    logger.info("Database initialized; Python executable: %s", sys.executable)
+    try:
+        yield
+    finally:
+        await stop_index_worker()
 
 
 app = FastAPI(
     title="Marginalia API",
-    description="E-book highlights → Feishu → Short Video Agent",
+    description="E-book highlights → Notes Library → Creation Agent",
     version="0.1.0",
     lifespan=lifespan,
 )
 
-# CORS — allow all origins for MVP
+# Browser access is restricted to configured origins in production.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -72,6 +89,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=settings.allowed_host_list,
+)
+
+
+@app.middleware("http")
+async def add_private_api_cache_headers(request: Request, call_next):
+    """Prevent API responses from being stored by browsers or edge caches."""
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["CDN-Cache-Control"] = "no-store"
+        response.headers["Cloudflare-CDN-Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 
 # ── Health ──────────────────────────────────────────────
@@ -86,7 +119,7 @@ async def sync_highlights(request: SyncRequest):
     """
     Receive highlights from the frontend reader.
     1. Validate and save to SQLite
-    2. Fire-and-forget forward to Feishu webhook
+    2. Refresh the standard JSON notes export
     3. Return assigned IDs
     """
     if not request.highlights:
@@ -103,10 +136,6 @@ async def sync_highlights(request: SyncRequest):
 
     # Keep the standard JSON export in sync with SQLite.
     asyncio.create_task(_export_notes())
-
-    # Fire-and-forget: push to Feishu webhook (don't block the response)
-    if settings.feishu_webhook_url:
-        asyncio.create_task(_send_to_feishu(highlights_dicts, ids))
 
     return SyncResponse(received=len(ids), ids=ids, items=items)
 
@@ -195,23 +224,147 @@ async def ask_book_question(request: BookQARequest):
         raise HTTPException(status_code=422, detail="Question is required")
 
     try:
-        from llm import LLMConfigError, answer_book_question_with_llm
+        from knowledge import KnowledgeError, answer_once, find_ready_book
 
-        answer = await answer_book_question_with_llm(
+        book_id = request.knowledge_book_id
+        if not book_id:
+            book = await find_ready_book(request.book_title, request.book_author)
+            if not book:
+                raise KnowledgeError("请先为这本书建立 AI 索引", 409, "index_not_ready")
+            book_id = book["id"]
+        result = await answer_once(
+            book_id=book_id,
             question=question,
-            book_title=request.book_title,
-            book_author=request.book_author,
-            chapter=request.chapter,
-            progress_percent=request.progress_percent,
-            highlights=[h.model_dump() for h in request.highlights],
+            conversation_id=request.conversation_id,
+            location={
+                "chapter": request.chapter,
+                "progress_percent": request.progress_percent,
+            },
+            local_highlights=[h.model_dump() for h in request.highlights],
         )
-    except LLMConfigError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+    except KnowledgeError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code, "message": str(e)})
     except Exception as e:
         logger.exception("Book Q&A failed")
         raise HTTPException(status_code=502, detail=f"Book Q&A failed: {e}")
 
-    return BookQAResponse(answer=answer)
+    return BookQAResponse(**result)
+
+
+# ── Persistent knowledge base ────────────────────────────
+@app.post("/api/knowledge/books/upload", status_code=202)
+async def upload_knowledge_book(
+    file: UploadFile = File(...),
+    title: str = Form(default=""),
+    author: str = Form(default=""),
+):
+    from knowledge import KnowledgeError, public_book, register_uploaded_book
+
+    if not file.filename or not file.filename.lower().endswith(".epub"):
+        raise HTTPException(status_code=415, detail="Only .epub files are supported")
+    content = await file.read(settings.max_epub_upload_mb * 1024 * 1024 + 1)
+    try:
+        return public_book(await register_uploaded_book(content, file.filename, title, author))
+    except KnowledgeError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code, "message": str(e)})
+
+
+@app.post("/api/knowledge/books/from-server", status_code=202)
+async def index_server_book(filename: str = Body(embed=True)):
+    from knowledge import KnowledgeError, public_book, register_server_book
+
+    try:
+        return public_book(await register_server_book(filename))
+    except KnowledgeError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code, "message": str(e)})
+
+
+@app.get("/api/knowledge/books/{book_id}")
+async def get_knowledge_book_endpoint(book_id: str):
+    from knowledge import get_book, public_book
+
+    book = await get_book(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    return public_book(book)
+
+
+@app.post("/api/knowledge/books/{book_id}/reindex", status_code=202)
+async def reindex_knowledge_book_endpoint(book_id: str):
+    from knowledge import KnowledgeError, public_book, reindex_book
+
+    try:
+        return public_book(await reindex_book(book_id))
+    except KnowledgeError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code, "message": str(e)})
+
+
+@app.delete("/api/knowledge/books/{book_id}")
+async def delete_knowledge_book_endpoint(book_id: str):
+    from knowledge import delete_knowledge_book
+
+    if not await delete_knowledge_book(book_id):
+        raise HTTPException(status_code=404, detail="Book not found")
+    return {"deleted": True, "id": book_id}
+
+
+@app.get("/api/knowledge/books/{book_id}/conversations")
+async def list_book_conversations(book_id: str):
+    from knowledge import list_conversations
+
+    conversations = await list_conversations(book_id)
+    return {"conversations": conversations, "count": len(conversations)}
+
+
+@app.post("/api/knowledge/books/{book_id}/conversations", status_code=201)
+async def create_book_conversation(book_id: str, request: ConversationCreate):
+    from knowledge import KnowledgeError, create_conversation
+
+    try:
+        return await create_conversation(book_id, request.title)
+    except KnowledgeError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code, "message": str(e)})
+
+
+@app.delete("/api/knowledge/conversations/{conversation_id}")
+async def delete_book_conversation(conversation_id: str):
+    from knowledge import delete_conversation
+
+    if not await delete_conversation(conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"deleted": True, "id": conversation_id}
+
+
+@app.get("/api/knowledge/conversations/{conversation_id}/messages")
+async def get_conversation_messages(
+    conversation_id: str, limit: int = 100, before: Optional[str] = None
+):
+    from knowledge import get_conversation, list_messages
+
+    if not await get_conversation(conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    messages = await list_messages(conversation_id, limit=limit, before=before)
+    return {"messages": messages, "count": len(messages)}
+
+
+@app.post("/api/knowledge/conversations/{conversation_id}/messages/stream")
+async def stream_conversation_message(conversation_id: str, request: QAStreamRequest):
+    from knowledge import get_conversation, stream_answer
+
+    if not await get_conversation(conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if not request.content.strip():
+        raise HTTPException(status_code=422, detail="Question is required")
+    return StreamingResponse(
+        stream_answer(
+            conversation_id,
+            request.content,
+            request.current_location.model_dump(),
+            [item.model_dump() for item in request.local_highlights],
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── Generate video script ───────────────────────────────
@@ -349,13 +502,62 @@ async def export_to_obsidian(request: ObsidianExportRequest):
 # ── Server-side EPUB books ─────────────────────────────
 @app.get("/api/books")
 async def get_books():
-    """List EPUB files available in backend/data/books/."""
-    return {"books": list_books()}
+    """List canonical EPUBs in the persistent server library."""
+    from library import list_library_books
+
+    return {"books": await list_library_books()}
+
+
+@app.post("/api/books/upload", status_code=202)
+async def upload_server_book(
+    file: UploadFile = File(...),
+    title: str = Form(default=""),
+    author: str = Form(default=""),
+):
+    from library import upload_library_book
+
+    content = await file.read(settings.max_epub_upload_mb * 1024 * 1024 + 1)
+    book, created = await upload_library_book(
+        content, file.filename or "book.epub", title, author
+    )
+    return {"book": book, "created": created}
+
+
+@app.get("/api/books/{book_id}/file")
+async def get_server_book_file(book_id: str):
+    from library import serve_library_book
+
+    return await serve_library_book(book_id)
+
+
+@app.get("/api/books/{book_id}/sync")
+async def get_server_book_sync(book_id: str):
+    from library import get_book_state
+
+    return await get_book_state(book_id)
+
+
+@app.post("/api/books/{book_id}/sync")
+async def sync_server_book(book_id: str, request: BookSyncRequest):
+    from library import sync_book_state
+
+    return await sync_book_state(
+        book_id, [operation.model_dump() for operation in request.operations]
+    )
+
+
+@app.delete("/api/books/{book_id}")
+async def delete_server_book(book_id: str):
+    from library import delete_library_book
+
+    if not await delete_library_book(book_id):
+        raise HTTPException(status_code=404, detail="Book not found")
+    return {"deleted": True, "id": book_id}
 
 
 @app.get("/api/books/{filename:path}")
 async def get_book(filename: str):
-    """Serve an EPUB file from backend/data/books/."""
+    """Legacy filename-based EPUB endpoint."""
     return serve_book(filename)
 
 
@@ -379,22 +581,6 @@ async def _export_notes() -> None:
         logger.info(f"Notes exported to {path}")
     except Exception as e:
         logger.error(f"Notes export failed: {e}")
-
-
-# ── Internal: Feishu forwarding ─────────────────────────
-async def _send_to_feishu(highlights: list[dict], ids: list[str]) -> None:
-    """Fire-and-forget: send highlights to Feishu webhook."""
-    try:
-        from feishu import send_to_feishu_webhook
-        success = await send_to_feishu_webhook(highlights)
-        if success:
-            from database import mark_feishu_synced
-            await mark_feishu_synced(ids)
-            logger.info(f"Feishu webhook sent for {len(ids)} highlights")
-        else:
-            logger.warning("Feishu webhook returned non-200")
-    except Exception as e:
-        logger.error(f"Feishu webhook failed: {e}")
 
 
 # ── Static files (frontend) ──────────────────────────────

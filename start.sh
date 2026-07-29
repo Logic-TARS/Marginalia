@@ -1,54 +1,49 @@
-#!/bin/bash
-# Marginalia 一键启动脚本
+#!/usr/bin/env bash
+set -euo pipefail
 
-set -e
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+VENV_DIR="$PROJECT_ROOT/.venv"
+VENV_PYTHON="$VENV_DIR/bin/python"
+PORT=8720
 
-echo ""
+echo
 echo "================================"
-echo "  Marginalia - EPUB 电子书阅读器"
+echo "  Marginalia - EPUB Reader"
 echo "================================"
-echo ""
+echo
 
-# Check Python
-if ! command -v python3 &>/dev/null && ! command -v python &>/dev/null; then
-    echo "[ERROR] 未检测到 Python，请先安装 Python 3.12+"
-    echo "        下载地址：https://www.python.org/downloads/"
+if [[ ! -x "$VENV_PYTHON" ]]; then
+    BOOTSTRAP_PYTHON=""
+    for candidate in python3.11 python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 &&
+           "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)'; then
+            BOOTSTRAP_PYTHON="$candidate"
+            break
+        fi
+    done
+    if [[ -z "$BOOTSTRAP_PYTHON" ]]; then
+        echo "[ERROR] Python 3.11 is required to create .venv."
+        exit 1
+    fi
+    echo "[INFO] Creating project virtual environment..."
+    "$BOOTSTRAP_PYTHON" -m venv "$VENV_DIR"
+fi
+
+"$VENV_PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)' || {
+    echo "[ERROR] .venv must use Python 3.11. Remove it manually and run this script again."
     exit 1
+}
+
+if [[ ! -f "$PROJECT_ROOT/.env" ]]; then
+    cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env"
 fi
 
-PYTHON=$(command -v python3 || command -v python)
-
-# Switch to script directory
-cd "$(dirname "$0")/backend"
-
-# Copy .env if not exists
-if [ ! -f ".env" ]; then
-    echo "[INFO] 创建 .env 配置文件..."
-    cp "../.env.example" ".env"
+if ! "$VENV_PYTHON" -c 'import fastapi, ebooklib, bs4, multipart, pytest' 2>/dev/null; then
+    echo "[INFO] Installing dependencies into .venv..."
+    "$VENV_PYTHON" -m pip install -r "$PROJECT_ROOT/backend/requirements.txt"
 fi
 
-# Check and install dependencies
-echo "[INFO] 检查依赖..."
-if ! $PYTHON -c "import fastapi" 2>/dev/null; then
-    echo "[INFO] 安装依赖中，请稍候..."
-    $PYTHON -m pip install -r requirements.txt -q
-    echo "[INFO] 依赖安装完成"
-fi
-
-# Open browser
-echo "[INFO] 启动浏览器..."
-if command -v open &>/dev/null; then
-    open "http://localhost:8720"
-elif command -v start &>/dev/null; then
-    start "http://localhost:8720"
-elif command -v xdg-open &>/dev/null; then
-    xdg-open "http://localhost:8720"
-fi
-
-# Start server
-echo ""
-echo "[INFO] 服务启动中 → http://localhost:8720"
-echo "[INFO] 按 Ctrl+C 停止服务"
-echo ""
-
-$PYTHON -m uvicorn main:app --host 0.0.0.0 --port 8720 --reload
+cd "$PROJECT_ROOT/backend"
+echo "[INFO] Python: $VENV_PYTHON"
+echo "[INFO] Starting server: http://127.0.0.1:$PORT"
+exec "$VENV_PYTHON" -m uvicorn main:app --host 127.0.0.1 --port "$PORT"

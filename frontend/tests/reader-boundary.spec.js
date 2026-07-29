@@ -21,6 +21,25 @@ async function openFixture(page) {
   await expect(page.locator('#page-text')).toHaveText(/第\s*\d+\s*\/\s*\d+\s*页/, { timeout: 15_000 });
 }
 
+async function doubleClickIframe(page) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const clicked = await page.locator('#epub-container').evaluate((host) => {
+      const iframe = Array.from(host.querySelectorAll('iframe')).find(item => item.contentDocument?.body);
+      if (!iframe) return false;
+      iframe.contentDocument.body.dispatchEvent(new MouseEvent('mousedown', {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        detail: 2,
+      }));
+      return true;
+    });
+    if (clicked) return;
+    await page.waitForTimeout(100);
+  }
+  throw new Error('No stable EPUB iframe found for double click');
+}
+
 /**
  * Helper: parse page text "第 X / Y 页" into { current, total }.
  */
@@ -98,8 +117,25 @@ test.describe('@smoke', () => {
     expect(containerMetrics.innerClientWidth).toBe(containerMetrics.hostClientWidth);
   });
 
-  test('narrow viewport keeps exact one-page button navigation', async ({ page }) => {
-    await page.setViewportSize({ width: 480, height: 800 });
+  test('desktop reader chrome auto-hides and returns on double click', async ({ page }) => {
+    await openFixture(page);
+    const reader = page.locator('#reader-view');
+    await expect(reader).toHaveClass(/reader-chrome-hidden/, { timeout: 6_000 });
+    await expect(page.locator('.app-nav')).toBeHidden();
+    await expect(page.locator('.reader-toolbar')).toBeHidden();
+    await expect(page.locator('.reader-footer')).toBeHidden();
+    await page.waitForTimeout(350);
+
+    await doubleClickIframe(page);
+
+    await expect(reader).not.toHaveClass(/reader-chrome-hidden/);
+    await expect(page.locator('.app-nav')).toBeVisible();
+    await expect(page.locator('.reader-toolbar')).toBeVisible();
+    await expect(page.locator('.reader-footer')).toBeVisible();
+  });
+
+  test('narrow desktop viewport keeps exact one-page button navigation', async ({ page }) => {
+    await page.setViewportSize({ width: 920, height: 800 });
     await openFixture(page);
 
     const initialChapter = await getChapterLabel(page);
