@@ -1,51 +1,86 @@
 /**
  * Marginalia Service Worker
- * Cache-first for app shell, network-first for API calls
+ * Versioned app-shell cache plus a stable EPUB cache.
  */
-const CACHE_NAME = 'marginalia-v24';
+const APP_CACHE_NAME = 'marginalia-app-v32';
+const EPUB_CACHE_NAME = 'marginalia-epub-v1';
+const LEGACY_CACHE_PREFIX = 'marginalia-v';
 
 const APP_SHELL = [
   '.',
   'index.html',
-  'app.js?v=24',
-  'style.css?v=24',
+  'app.js?v=31',
+  'style.css?v=29',
   'manifest.json',
   'jszip.min.js',
   'epub.min.js',
 ];
 
-// Install: cache app shell
+function isEpubRequest(request) {
+  const url = new URL(request.url);
+  return request.method === 'GET' &&
+    url.pathname.startsWith('/api/books/') &&
+    (url.pathname.endsWith('/file') || url.pathname.toLowerCase().endsWith('.epub'));
+}
+
+function withCacheSource(response, source) {
+  const headers = new Headers(response.headers);
+  headers.set('X-Marginalia-Cache', source);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+// Install: cache only the replaceable application shell.
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(APP_CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
       .then(() => self.skipWaiting())
   );
 });
 
-// Activate: clean old caches
+async function migrateLegacyEpubEntries(cacheNames) {
+  const epubCache = await caches.open(EPUB_CACHE_NAME);
+  for (const cacheName of cacheNames.filter(name => name.startsWith(LEGACY_CACHE_PREFIX))) {
+    const legacyCache = await caches.open(cacheName);
+    const requests = await legacyCache.keys();
+    for (const request of requests.filter(isEpubRequest)) {
+      if (await epubCache.match(request)) continue;
+      const response = await legacyCache.match(request);
+      if (response) await epubCache.put(request, response);
+    }
+  }
+}
+
+// Activate: migrate old EPUB responses, then clean only replaceable app caches.
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
-      )
-    ).then(() => self.clients.claim())
+    caches.keys().then(async (keys) => {
+      await migrateLegacyEpubEntries(keys);
+      await Promise.all(
+        keys
+          .filter(key => (
+            (key.startsWith('marginalia-app-') && key !== APP_CACHE_NAME) ||
+            key.startsWith(LEGACY_CACHE_PREFIX)
+          ))
+          .map(key => caches.delete(key))
+      );
+    }).then(() => self.clients.claim())
   );
 });
 
-function cacheFirst(request) {
-  return caches.match(request).then((cached) => {
-    if (cached) return cached;
+function cacheFirst(request, cacheName = APP_CACHE_NAME, annotate = false) {
+  return caches.open(cacheName).then(async (cache) => {
+    const cached = await cache.match(request);
+    if (cached) return annotate ? withCacheSource(cached, 'hit') : cached;
 
-    return fetch(request).then((response) => {
-      if (request.method === 'GET' && response.status === 200) {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(request, clone);
-        });
-      }
-      return response;
-    });
+    const response = await fetch(request);
+    if (request.method === 'GET' && response.status === 200) {
+      await cache.put(request, response.clone());
+    }
+    return annotate ? withCacheSource(response, 'network') : response;
   });
 }
 
@@ -53,27 +88,22 @@ function networkFirst(request) {
   return fetch(request).then((response) => {
     if (request.method === 'GET' && response.status === 200) {
       const clone = response.clone();
-      caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+      caches.open(APP_CACHE_NAME).then((cache) => cache.put(request, clone));
     }
     return response;
   }).catch(() => caches.match(request));
 }
 
-// Fetch: cache-first for app shell/books, network-first for API data
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Server-side EPUB files are static and expensive over remote links.
-  if (
-    event.request.method === 'GET' &&
-    url.pathname.startsWith('/api/books/') &&
-    (url.pathname.endsWith('/file') || url.pathname.toLowerCase().endsWith('.epub'))
-  ) {
-    event.respondWith(cacheFirst(event.request));
+  // EPUB files survive application-shell upgrades and expose cache provenance.
+  if (isEpubRequest(event.request)) {
+    event.respondWith(cacheFirst(event.request, EPUB_CACHE_NAME, true));
     return;
   }
 
-  // API calls: network-first (don't cache)
+  // Other API calls are always network-first and are not cached.
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(event.request).catch(() => {
@@ -86,8 +116,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Prefer fresh application code online so remote devices do not remain on
-  // an old import flow after a deployment.
+  // Prefer fresh application code online.
   if (
     event.request.mode === 'navigate' ||
     url.pathname.endsWith('/index.html') ||
@@ -105,11 +134,10 @@ self.addEventListener('fetch', (event) => {
   // Vendored libraries and other static assets remain cache-first.
   event.respondWith(
     cacheFirst(event.request).catch(() => {
-        // Offline fallback for navigation
-        if (event.request.mode === 'navigate') {
-          return caches.match('index.html');
-        }
-        return new Response('Offline', { status: 503 });
+      if (event.request.mode === 'navigate') {
+        return caches.match('index.html');
+      }
+      return new Response('Offline', { status: 503 });
     })
   );
 });

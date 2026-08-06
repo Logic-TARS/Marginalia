@@ -244,12 +244,11 @@
       "css": ".ds-input { width: 100%; min-height: 40px; padding: 9px 11px; border: 1px solid var(--line, #ded6c8); border-radius: 8px; background: rgba(255,253,248,.94); color: var(--ink, #20231f); font: 400 15px/1.5 -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif; outline: none; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; } .ds-input:hover { border-color: var(--line-strong, #c8bcaa); } .ds-input:focus { border-color: var(--accent, #2f604a); background: var(--surface-raised, #fff); box-shadow: 0 0 0 3px rgba(47,96,74,.14); }"
     },
     {
-      "name": "Segmented Navigation",
+      "name": "Home Header",
       "kind": "nav",
-      "refersTo": "nav-tab-active",
-      "description": "书库、阅读和创作三个主工作区的切换。",
-      "html": "<nav class=\"ds-nav\" aria-label=\"主导航\"><button class=\"ds-nav-tab ds-nav-tab-active\">书库</button><button class=\"ds-nav-tab\">阅读</button><button class=\"ds-nav-tab\">创作</button></nav>",
-      "css": ".ds-nav { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--line, #ded6c8); border-radius: 8px; background: rgba(239,233,223,.76); } .ds-nav-tab { min-width: 70px; height: 34px; padding: 0 14px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-soft, #575c50); font: 400 15px/1 -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"PingFang SC\", \"Microsoft YaHei\", sans-serif; cursor: pointer; transition: background .15s ease, color .15s ease, box-shadow .15s ease; } .ds-nav-tab:hover { color: var(--ink, #20231f); background: rgba(255,255,255,.55); } .ds-nav-tab:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(47,96,74,.14); } .ds-nav-tab-active { color: var(--accent, #2f604a); background: var(--surface-raised, #fff); box-shadow: var(--shadow-sm, 0 1px 2px rgba(55,45,31,.08)); }"
+      "description": "只在主界面显示品牌和当前位置；阅读页与创作页使用各自的返回入口。",
+      "html": "<header class=\"ds-home-header\"><div class=\"ds-brand\"><span class=\"ds-brand-mark\">M</span><strong>Marginalia</strong></div><span class=\"ds-home-label\">主界面</span></header>",
+      "css": ".ds-home-header { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 10px 22px; border-bottom: 1px solid rgba(157,142,118,.38); background: rgba(255,253,248,.94); box-shadow: var(--shadow-sm, 0 1px 2px rgba(55,45,31,.08)); } .ds-brand { display: flex; align-items: center; gap: 12px; } .ds-brand-mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 8px; background: var(--accent, #2f604a); color: #fffaf0; font: 700 20px/1 Georgia, serif; } .ds-home-label { padding: 6px 10px; border: 1px solid var(--line, #ded6c8); border-radius: 999px; color: var(--ink-soft, #575c50); font-size: 12px; font-weight: 700; }"
     },
     {
       "name": "Note Chip",

@@ -17,6 +17,23 @@
   const READER_CHROME_INITIAL_HIDE_MS = 2400;
   const READER_CHROME_AUTO_HIDE_MS = 3600;
   const READER_CHROME_AUTO_HIDE_KEY = 'marginalia.readerChromeAutoHide';
+  const READER_TYPOGRAPHY_KEY = 'marginalia.readerTypography';
+  const READER_FONT_FAMILIES = new Set(['original', 'serif', 'sans', 'kai']);
+  const READER_FONT_STACKS = {
+    serif: '"Noto Serif SC", "Source Han Serif SC", "Songti SC", SimSun, Georgia, serif',
+    sans: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+    kai: '"Kaiti SC", STKaiti, KaiTi, "楷体", serif',
+  };
+  const TTS_POSITION_KEY = 'marginalia.tts.position';
+  const TTS_POLL_INTERVAL_MS = 1000;
+  const TTS_CONTENT_BLOCK_SELECTOR = 'h1, h2, h3, h4, p, li, blockquote, figcaption';
+  const TTS_FOLLOW_CLASS = 'marginalia-tts-follow';
+  const TTS_FOLLOW_UNDERLINE_CLASS = 'marginalia-tts-follow-underline';
+  const VIEW_ROUTES = {
+    home: '#/',
+    reader: '#/reader',
+    creation: '#/creation',
+  };
   const READER_DOUBLE_TAP_MAX_MS = 650;
   const READER_DOUBLE_TAP_MAX_DISTANCE = 72;
   const READER_TAP_MAX_MOVE = 28;
@@ -36,6 +53,7 @@
   let currentBookMeta = null;   // our DB book record
   let currentBookUrl = null;    // blob URL for current EPUB (for cleanup)
   let currentChapter = '';
+  let currentChapterId = '';
   let currentCfi = '';
   let pendingSelection = null;  // { cfiRange, text } from last selection
   let selectedMaterialId = null;
@@ -48,6 +66,8 @@
   let layoutRefreshToken = 0;
   let isLayoutRefreshing = false;
   let pageNavigationInProgress = false;
+  let pageNavigationControlsForcedDisabled = false;
+  let progressJumpInProgress = false;
   let pageNavigationToken = 0;
   const PAGE_NAVIGATION_COOLDOWN = 180;
   let wheelGestureTimer = null;
@@ -58,6 +78,7 @@
   const WHEEL_DELTA_THRESHOLD = 60;
   const WHEEL_IDLE_MS = 420;
   let currentFontSize = 100;  // percentage, 100 = default
+  let currentReaderFontFamily = 'original';
   const FONT_SIZE_STEP = 5;   // percent per scroll
   const FONT_SIZE_MIN = 60;
   const FONT_SIZE_MAX = 200;
@@ -80,8 +101,25 @@
   let readerChromeVisible = true;
   let readerChromeAutoHideEnabled = true;
   let readerChromeHideTimer = null;
-  let readerChromeLayoutTimer = null;
   let readerIframeObserver = null;
+  let currentView = 'home';
+  let ttsTask = null;
+  let ttsChapterId = '';
+  let ttsSegmentIndex = 0;
+  let ttsPollTimer = null;
+  let ttsWantsPlay = false;
+  let ttsIsPlaying = false;
+  let ttsPlaybackStarting = false;
+  let ttsRestoredPosition = null;
+  let ttsLastSavedAt = 0;
+  let ttsFollowCfi = '';
+  let ttsFollowCueKey = '';
+  let ttsFollowUpdateToken = 0;
+  let ttsFollowNavigationInProgress = false;
+  let ttsFollowPendingNavigation = null;
+  let ttsFollowNavigationWorker = null;
+  let ttsFollowDocumentCache = null;
+  let ttsNavigationNoticeAt = 0;
 
   // ==================== DOM REFS ====================
   const $ = (sel) => document.querySelector(sel);
@@ -89,7 +127,6 @@
 
   const dom = {
     app: $('#app'),
-    appNav: $('.app-nav'),
     libraryView: $('#library-view'),
     readerView: $('#reader-view'),
     readerToolbar: $('.reader-toolbar'),
@@ -137,7 +174,29 @@
     btnAddBookmark: $('#btn-add-bookmark'),
     btnToggleNotes: $('#btn-toggle-notes'),
     btnToggleSearch: $('#btn-toggle-search'),
+    btnToggleTts: $('#btn-toggle-tts'),
     btnToggleReaderAutoHide: $('#btn-toggle-reader-auto-hide'),
+    readerFontFamily: $('#reader-font-family'),
+    readerFontSize: $('#reader-font-size'),
+    readerFontSizeValue: $('#reader-font-size-value'),
+    btnReaderFontDecrease: $('#btn-reader-font-decrease'),
+    btnReaderFontReset: $('#btn-reader-font-reset'),
+    btnReaderFontIncrease: $('#btn-reader-font-increase'),
+    ttsPanel: $('#tts-panel'),
+    ttsStatus: $('#tts-status'),
+    ttsVoice: $('#tts-voice'),
+    ttsRate: $('#tts-rate'),
+    ttsContinuous: $('#tts-continuous'),
+    ttsAudio: $('#tts-audio'),
+    ttsProgress: $('#tts-progress'),
+    ttsTime: $('#tts-time'),
+    ttsSegmentLabel: $('#tts-segment-label'),
+    btnCloseTts: $('#btn-close-tts'),
+    btnTtsStart: $('#btn-tts-start'),
+    btnTtsPrev: $('#btn-tts-prev'),
+    btnTtsPlay: $('#btn-tts-play'),
+    btnTtsPause: $('#btn-tts-pause'),
+    btnTtsNext: $('#btn-tts-next'),
     toolbarSearch: $('#toolbar-search'),
     searchInput: $('#search-input'),
     btnSearch: $('#btn-search'),
@@ -165,11 +224,9 @@
     readerLoadingProgress: $('#reader-loading-progress'),
     readerLoadingProgressBar: $('#reader-loading-progress-bar'),
     readerLoadingProgressText: $('#reader-loading-progress-text'),
-    btnNavLibrary: $('#btn-nav-library'),
-    btnNavRead: $('#btn-nav-read'),
-    btnNavCreate: $('#btn-nav-create'),
     btnLibraryCreate: $('#btn-library-create'),
     creationView: $('#creation-view'),
+    btnCreationBack: $('#btn-creation-back'),
     btnRefreshMaterials: $('#btn-refresh-materials'),
     btnExportBook: $('#btn-export-book'),
     materialBookFilter: $('#material-book-filter'),
@@ -374,9 +431,26 @@
     operationHideTimer = null;
   }
 
+  function isServerBookRecord(book) {
+    return Boolean(book && (book.server_book_id || book.source === 'server' || book._source === 'server'));
+  }
+
+  function hasFreshLocalEpub(book) {
+    if (!book || !book.file_blob) return false;
+    if (!isServerBookRecord(book)) return true;
+    return !book.content_hash ||
+      !book.cached_content_hash ||
+      book.cached_content_hash === book.content_hash;
+  }
+
+  function formatEpubAvailability(book) {
+    if (!isServerBookRecord(book)) return '本机书籍';
+    return hasFreshLocalEpub(book) ? '已保存到本机' : '需要联网打开';
+  }
+
   function getTransferState(book) {
     if (book.transfer_status) return book.transfer_status;
-    if (book.server_book_id || book.source === 'server' || book._source === 'server') return 'synced';
+    if (isServerBookRecord(book)) return 'synced';
     return book.file_blob ? 'local_only' : 'failed';
   }
 
@@ -487,9 +561,33 @@
     }
   }
 
-  async function showLibrary() {
+  function writeViewHistory(view, mode = 'push', extraState = {}) {
+    if (mode === 'none') return;
+    const state = {
+      ...(history.state || {}),
+      marginaliaView: view,
+      ...extraState,
+    };
+    const route = VIEW_ROUTES[view] || VIEW_ROUTES.home;
+    if (mode === 'replace' || history.state?.marginaliaView === view) {
+      history.replaceState(state, '', route);
+    } else {
+      history.pushState(state, '', route);
+    }
+  }
+
+  function returnToHome() {
+    if (history.state?.marginaliaView === 'reader' || history.state?.marginaliaView === 'creation') {
+      history.back();
+      return;
+    }
+    showHome({ historyMode: 'replace' });
+  }
+
+  async function showHome({ historyMode = 'push' } = {}) {
     // Flush progress to IndexedDB before clearing state
     await saveCurrentProgress();
+    stopTtsForChapter({ resetTask: true });
 
     // Destroy epub.js resources BEFORE nulling references
     if (currentRendition) {
@@ -510,6 +608,7 @@
     // Reset all reader state
     currentCfi = '';
     currentChapter = '';
+    currentChapterId = '';
     pendingSelection = null;
     selectedMaterialId = null;
     selectedMaterialIds.clear();
@@ -522,11 +621,13 @@
     dom.libraryView.classList.add('active');
     dom.readerView.classList.remove('active');
     dom.creationView.classList.remove('active');
+    document.body.classList.remove('reader-active');
     resetReaderChrome();
     closeMobileReaderPanels();
     syncReaderPanelBackdrop();
-    setActiveNav('library');
     setReaderToolsOpen(false);
+    dom.ttsPanel.hidden = true;
+    syncReaderToolStates();
     hideReaderLoading();
     hideSelectionToolbar();
     if (currentBookUrl) {
@@ -534,35 +635,72 @@
       currentBookUrl = null;
     }
     currentBookMeta = null;
+    currentView = 'home';
+    writeViewHistory('home', historyMode, { bookId: '' });
     renderLibrary();
   }
 
-  function showReader() {
+  function showReader({ historyMode = 'push', bookId = '' } = {}) {
     dom.libraryView.classList.remove('active');
     dom.readerView.classList.add('active');
     dom.creationView.classList.remove('active');
+    document.body.classList.add('reader-active');
     setReaderChromeVisible(true);
-    setActiveNav('read');
+    currentView = 'reader';
+    writeViewHistory('reader', historyMode, { bookId: bookId || currentBookMeta?.id || '' });
     syncReaderToolStates();
     syncReaderPanelBackdrop();
     if (currentRendition) scheduleReaderChromeHide(READER_CHROME_INITIAL_HIDE_MS);
   }
 
-  async function showCreation() {
+  async function showCreation({ historyMode = 'push' } = {}) {
     dom.libraryView.classList.remove('active');
     dom.readerView.classList.remove('active');
     dom.creationView.classList.add('active');
+    document.body.classList.remove('reader-active');
     resetReaderChrome();
     closeMobileReaderPanels();
     syncReaderPanelBackdrop();
-    setActiveNav('create');
+    currentView = 'creation';
+    writeViewHistory('creation', historyMode, { bookId: '' });
     await renderCreationWorkspace();
   }
 
-  function setActiveNav(target) {
-    dom.btnNavLibrary.classList.toggle('active', target === 'library');
-    dom.btnNavRead.classList.toggle('active', target === 'read');
-    dom.btnNavCreate.classList.toggle('active', target === 'create');
+  async function restoreViewFromHistory() {
+    const state = history.state || {};
+    if (state.marginaliaView === 'creation' && window.location.hash === VIEW_ROUTES.creation) {
+      await showCreation({ historyMode: 'none' });
+      return;
+    }
+    if (state.marginaliaView === 'reader' && state.bookId && window.location.hash === VIEW_ROUTES.reader) {
+      const book = await dbGet('books', state.bookId);
+      if (book) {
+        await openBook(book, { historyMode: 'none' });
+        return;
+      }
+    }
+    currentView = 'home';
+    writeViewHistory('home', 'replace', { bookId: '' });
+  }
+
+  async function handleHistoryNavigation(event) {
+    const target = event.state?.marginaliaView || 'home';
+    if (target === 'creation') {
+      await showCreation({ historyMode: 'none' });
+      return;
+    }
+    if (target === 'reader' && event.state?.bookId) {
+      if (currentView === 'reader' && currentBookMeta?.id === event.state.bookId && currentRendition) {
+        showReader({ historyMode: 'none', bookId: event.state.bookId });
+        return;
+      }
+      const book = await dbGet('books', event.state.bookId);
+      if (book) {
+        await openBook(book, { historyMode: 'none' });
+        return;
+      }
+    }
+    await showHome({ historyMode: target === 'home' ? 'none' : 'replace' });
   }
 
   function safeFocus(el) {
@@ -600,6 +738,7 @@
       !dom.aiPanel.classList.contains('collapsed') ||
       !dom.notesPanel.classList.contains('collapsed') ||
       !dom.searchPanel.hidden ||
+      !dom.ttsPanel.hidden ||
       !dom.noteModal.hidden ||
       !dom.bookDeleteModal.hidden ||
       !dom.readerLoading.hidden;
@@ -623,16 +762,6 @@
     }
   }
 
-  function refreshLayoutAfterChromeChange() {
-    refreshReaderLayout();
-    if (readerChromeLayoutTimer) clearTimeout(readerChromeLayoutTimer);
-    readerChromeLayoutTimer = setTimeout(() => {
-      readerChromeLayoutTimer = null;
-      refreshReaderLayout();
-      setupIframeNavigation();
-    }, 280);
-  }
-
   function setReaderChromeVisible(visible, { autoHide = false, force = false } = {}) {
     const readerIsActive = dom.readerView.classList.contains('active');
     const shouldShow = !readerIsActive ? true : Boolean(visible);
@@ -643,16 +772,12 @@
       setReaderToolsOpen(false, { skipChromeSchedule: true });
     }
 
-    const changed = readerChromeVisible !== shouldShow ||
-      dom.readerView.classList.contains('reader-chrome-hidden') === shouldShow;
     readerChromeVisible = shouldShow;
     dom.readerView.classList.toggle('reader-chrome-hidden', !shouldShow);
     document.body.classList.toggle('reader-chrome-hidden', !shouldShow && readerIsActive);
     setChromeElementHidden(dom.readerToolbar, !shouldShow);
     setChromeElementHidden(dom.readerFooter, !shouldShow);
-    setChromeElementHidden(dom.appNav, !shouldShow && readerIsActive);
 
-    if (changed) refreshLayoutAfterChromeChange();
     if (shouldShow && autoHide) scheduleReaderChromeHide();
     return true;
   }
@@ -716,18 +841,107 @@
     }
   }
 
+  function normalizeReaderFontSize(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 100;
+    const clamped = Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, parsed));
+    return Math.round(clamped / FONT_SIZE_STEP) * FONT_SIZE_STEP;
+  }
+
+  function updateReaderTypographyUI() {
+    if (dom.readerFontFamily) dom.readerFontFamily.value = currentReaderFontFamily;
+    if (dom.readerFontSize) dom.readerFontSize.value = String(currentFontSize);
+    if (dom.readerFontSizeValue) dom.readerFontSizeValue.value = `${currentFontSize}%`;
+    if (dom.btnReaderFontDecrease) dom.btnReaderFontDecrease.disabled = currentFontSize <= FONT_SIZE_MIN;
+    if (dom.btnReaderFontIncrease) dom.btnReaderFontIncrease.disabled = currentFontSize >= FONT_SIZE_MAX;
+  }
+
+  function persistReaderTypographyPreference() {
+    try {
+      localStorage.setItem(READER_TYPOGRAPHY_KEY, JSON.stringify({
+        fontFamily: currentReaderFontFamily,
+        fontSize: currentFontSize,
+      }));
+    } catch (_err) {
+      // The preference remains active for this session if storage is blocked.
+    }
+  }
+
+  function loadReaderTypographyPreference() {
+    currentReaderFontFamily = 'original';
+    currentFontSize = 100;
+    try {
+      const saved = JSON.parse(localStorage.getItem(READER_TYPOGRAPHY_KEY) || 'null');
+      if (saved && typeof saved === 'object') {
+        if (READER_FONT_FAMILIES.has(saved.fontFamily)) {
+          currentReaderFontFamily = saved.fontFamily;
+        }
+        currentFontSize = normalizeReaderFontSize(saved.fontSize);
+      }
+    } catch (_err) {
+      currentReaderFontFamily = 'original';
+      currentFontSize = 100;
+    }
+    updateReaderTypographyUI();
+  }
+
+  function applyReaderTypographyToDocument(doc) {
+    if (!doc || !doc.head || !doc.documentElement) return;
+    const styleId = 'marginalia-reader-typography-style';
+    const existingStyle = doc.getElementById(styleId);
+    if (currentReaderFontFamily === 'original') {
+      doc.documentElement.removeAttribute('data-marginalia-reader-font');
+      if (existingStyle) existingStyle.remove();
+      return;
+    }
+
+    const fontStack = READER_FONT_STACKS[currentReaderFontFamily];
+    if (!fontStack) return;
+    doc.documentElement.setAttribute('data-marginalia-reader-font', currentReaderFontFamily);
+    const style = existingStyle || doc.createElement('style');
+    style.id = styleId;
+    style.textContent = `body, body * { font-family: ${fontStack} !important; }`;
+    if (!existingStyle) doc.head.appendChild(style);
+  }
+
+  function applyReaderTypography({ refresh = true } = {}) {
+    const anchorCfi = getCurrentAnchorCfi();
+    if (currentRendition && currentRendition.themes) {
+      currentRendition.themes.fontSize(`${currentFontSize}%`);
+    }
+    for (const iframe of findReaderIframes()) {
+      try {
+        applyReaderTypographyToDocument(iframe.contentDocument);
+      } catch (_err) {
+        // Ignore inaccessible or not-yet-ready rendition frames.
+      }
+    }
+    if (refresh && currentRendition) {
+      refreshReaderLayout({ anchorCfi });
+    }
+  }
+
+  function setReaderFontSize(value, { persist = true } = {}) {
+    currentFontSize = normalizeReaderFontSize(value);
+    updateReaderTypographyUI();
+    if (persist) persistReaderTypographyPreference();
+    applyReaderTypography();
+  }
+
+  function setReaderFontFamily(value, { persist = true } = {}) {
+    currentReaderFontFamily = READER_FONT_FAMILIES.has(value) ? value : 'original';
+    updateReaderTypographyUI();
+    if (persist) persistReaderTypographyPreference();
+    applyReaderTypography();
+  }
+
   function resetReaderChrome() {
     cancelReaderChromeHide();
-    if (readerChromeLayoutTimer) {
-      clearTimeout(readerChromeLayoutTimer);
-      readerChromeLayoutTimer = null;
-    }
     readerChromeVisible = true;
     dom.readerView.classList.remove('reader-chrome-hidden');
     document.body.classList.remove('reader-chrome-hidden');
     setChromeElementHidden(dom.readerToolbar, false);
     setChromeElementHidden(dom.readerFooter, false);
-    setChromeElementHidden(dom.appNav, false);
   }
 
   function syncReaderToolStates() {
@@ -743,13 +957,17 @@
     if (dom.btnToggleSearch) {
       dom.btnToggleSearch.setAttribute('aria-expanded', String(!dom.searchPanel.hidden));
     }
+    if (dom.btnToggleTts) {
+      dom.btnToggleTts.setAttribute('aria-expanded', String(!dom.ttsPanel.hidden));
+    }
   }
 
   function syncReaderPanelBackdrop() {
     const hasOpenPanel = isMobileLayout() && dom.readerView.classList.contains('active') && (
       !dom.aiPanel.classList.contains('collapsed') ||
       !dom.notesPanel.classList.contains('collapsed') ||
-      !dom.searchPanel.hidden
+      !dom.searchPanel.hidden ||
+      !dom.ttsPanel.hidden
     );
     dom.readerPanelBackdrop.hidden = !hasOpenPanel;
     document.body.classList.toggle('reader-panel-open', hasOpenPanel);
@@ -771,13 +989,17 @@
       dom.toolbarSearch.hidden = true;
       dom.btnSearchClose.hidden = true;
     }
+    if (except !== 'tts') {
+      dom.ttsPanel.hidden = true;
+    }
   }
 
   function closeMobileReaderPanels({ restoreFocus = false } = {}) {
     if (!isMobileLayout()) return false;
     const hadOpenPanel = !dom.aiPanel.classList.contains('collapsed') ||
       !dom.notesPanel.classList.contains('collapsed') ||
-      !dom.searchPanel.hidden;
+      !dom.searchPanel.hidden ||
+      !dom.ttsPanel.hidden;
     closeOtherMobileReaderPanels('');
     setReaderToolsOpen(false);
     syncReaderToolStates();
@@ -830,44 +1052,79 @@
     for (const book of allBooks) {
       const card = document.createElement('div');
       card.className = 'book-card';
-      const isServer = book._source === 'server';
+      const isServer = isServerBookRecord(book);
       const transferState = getTransferState(book);
       const transferProgress = Math.max(0, Math.min(100, book.transfer_progress || 0));
       card.dataset.bookId = book.id;
       if (isServer) card.dataset.serverBook = 'true';
 
       const highlightCount = await getBookHighlightCount(book.id);
+      const bookTitle = book.book_title || '未命名书籍';
+      const titleCharacters = Array.from(bookTitle.trim());
+      const coverInitial = titleCharacters[0] || 'M';
+      const coverPalettes = [
+        ['#315f4a', '#1d3d30', '#d9c28b'],
+        ['#72513c', '#432f26', '#ead0a0'],
+        ['#44566f', '#293746', '#d5c39b'],
+        ['#67516f', '#3f3146', '#e2c69d'],
+        ['#736638', '#463e24', '#ead59c'],
+      ];
+      const paletteSeed = titleCharacters.reduce((sum, character) => sum + character.codePointAt(0), 0);
+      const coverPalette = coverPalettes[paletteSeed % coverPalettes.length];
+      const progressPercent = Math.max(0, Math.min(100, Number(book.progress_percent || 0)));
+      const lastOpened = formatRelativeDate(book.last_opened) || '尚未阅读';
+      card.style.setProperty('--book-cover-start', coverPalette[0]);
+      card.style.setProperty('--book-cover-end', coverPalette[1]);
+      card.style.setProperty('--book-cover-ink', coverPalette[2]);
+      card.setAttribute('role', 'button');
+      card.setAttribute('tabindex', '0');
+      card.setAttribute('aria-label', `打开《${bookTitle}》`);
 
       card.innerHTML = `
-        <div class="book-card-cover">${isServer ? '📡' : '📖'}</div>
+        <div class="book-card-cover" aria-hidden="true">
+          <span class="book-card-cover-initial">${escapeHTML(coverInitial)}</span>
+          <span class="book-card-cover-mark">Marginalia</span>
+        </div>
         <div class="book-card-info">
-          <div class="book-card-title">${escapeHTML(book.book_title || '未命名书籍')}</div>
+          <div class="book-card-badges">
+            <span class="book-source-badge">${isServer ? '云端书库' : '本机书籍'}</span>
+            <span class="book-ai-badge" data-state="${escapeHTML(book.knowledge_status || 'unregistered')}">${escapeHTML(formatKnowledgeStatus(book.knowledge_status))}</span>
+          </div>
+          <div class="book-card-title">${escapeHTML(bookTitle)}</div>
           <div class="book-card-author">${escapeHTML(book.book_author || '未知作者')}</div>
           <div class="book-card-meta">
-            <span>✏️ ${highlightCount} 条划线</span>
-            <span>${isServer ? '服务器' : formatRelativeDate(book.last_opened)}</span>
-            <span>${escapeHTML(formatKnowledgeStatus(book.knowledge_status))}</span>
+            <span class="book-source-compat" aria-hidden="true">${isServer ? '服务器' : '本机'}</span>
+            <span>${highlightCount} 条划线</span>
+            <span>${escapeHTML(lastOpened)}</span>
+            <span>${escapeHTML(formatEpubAvailability(book))}</span>
           </div>
           <div class="book-transfer-status" data-state="${escapeHTML(transferState)}">
             <span class="book-transfer-label">${escapeHTML(formatTransferStatus(book))}</span>
             <span class="book-transfer-progress" ${transferState === 'uploading' ? '' : 'hidden'}>
               <span style="width:${transferProgress}%"></span>
             </span>
-            <button class="book-transfer-retry" data-action="retry-upload"
+            <button class="book-transfer-retry" data-action="retry-upload" type="button"
                     ${transferState === 'failed' || transferState === 'local_only' ? '' : 'hidden'}>
               重试
             </button>
           </div>
-          <div class="book-card-progress">
-            <div class="book-card-progress-bar" style="width:${book.progress_percent || 0}%"></div>
+          <div class="book-progress-copy"><span>阅读进度</span><strong>${Math.round(progressPercent)}%</strong></div>
+          <div class="book-card-progress" role="progressbar" aria-label="阅读进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progressPercent)}">
+            <div class="book-card-progress-bar" style="width:${progressPercent}%"></div>
           </div>
         </div>
-        <button class="book-card-delete" data-action="delete" title="删除">🗑</button>
+        <button class="book-card-delete" data-action="delete" title="删除《${escapeHTML(bookTitle)}》" aria-label="删除《${escapeHTML(bookTitle)}》" type="button">×</button>
       `;
 
-      card.addEventListener('click', (e) => {
-        if (e.target.closest('[data-action]')) return;
+      const openCard = (event) => {
+        if (event && event.target.closest('[data-action]')) return;
         openBook(book);
+      };
+      card.addEventListener('click', openCard);
+      card.addEventListener('keydown', (event) => {
+        if (event.target !== card || (event.key !== 'Enter' && event.key !== ' ')) return;
+        event.preventDefault();
+        openCard(event);
       });
 
       const deleteBtn = card.querySelector('.book-card-delete');
@@ -911,6 +1168,12 @@
         const localBook = existingBook && existingBook.id === b.id
           ? existingBook
           : (await dbGet('books', b.id));
+        const serverHash = b.content_hash || '';
+        const localBlob = localBook ? (localBook.file_blob || null) : null;
+        const localCachedHash = localBook ? (localBook.cached_content_hash || '') : '';
+        const cacheMatchesServer = Boolean(localBlob) && (
+          !serverHash || !localCachedHash || localCachedHash === serverHash
+        );
         const record = {
           id: b.id,
           server_book_id: b.id,
@@ -919,8 +1182,10 @@
           book_author: b.author,
           filename: b.filename,
           original_filename: b.original_filename,
-          content_hash: b.content_hash,
-          file_blob: localBook ? (localBook.file_blob || null) : null,
+          content_hash: serverHash,
+          file_blob: cacheMatchesServer ? localBlob : null,
+          cached_content_hash: cacheMatchesServer ? (serverHash || localCachedHash) : '',
+          cached_at: cacheMatchesServer ? (localBook.cached_at || Date.now()) : 0,
           last_opened: localBook ? localBook.last_opened : 0,
           progress_percent: localBook ? localBook.progress_percent : 0,
           last_cfi: localBook ? localBook.last_cfi : '',
@@ -1223,6 +1488,8 @@
       book_title: serverBook.title || localBook.book_title,
       book_author: serverBook.author || localBook.book_author,
       file_blob: arrayBuffer || localBook.file_blob || (existingTarget && existingTarget.file_blob) || null,
+      cached_content_hash: serverBook.content_hash || localBook.cached_content_hash || '',
+      cached_at: Date.now(),
       knowledge_book_id: serverBook.knowledge_book_id || null,
       knowledge_status: serverBook.knowledge_status || 'unregistered',
       knowledge_error: serverBook.knowledge_error || '',
@@ -1671,6 +1938,37 @@
   }
 
   // ==================== READER ====================
+  function isStorageQuotaError(err) {
+    return Boolean(err && (
+      err.name === 'QuotaExceededError' ||
+      err.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+      err.code === 22 ||
+      err.code === 1014
+    ));
+  }
+
+  async function persistServerEpub(bookMeta, arrayBuffer) {
+    const cachedBook = {
+      ...bookMeta,
+      file_blob: arrayBuffer,
+      cached_content_hash: bookMeta.content_hash || '',
+      cached_at: Date.now(),
+    };
+    try {
+      await dbPut('books', cachedBook);
+      Object.assign(bookMeta, cachedBook);
+      if (currentBookMeta && currentBookMeta.id === bookMeta.id) currentBookMeta = bookMeta;
+      return true;
+    } catch (err) {
+      console.warn('Unable to persist EPUB offline copy:', err);
+      const detail = isStorageQuotaError(err)
+        ? '浏览器存储空间不足，下次打开可能需要重新下载'
+        : '离线副本保存失败，下次打开可能需要重新下载';
+      showToast(detail, 'warning');
+      return false;
+    }
+  }
+
   async function downloadServerEpub(bookMeta) {
     const bookId = bookMeta.server_book_id || bookMeta.id;
     const controller = new AbortController();
@@ -1688,9 +1986,11 @@
       if (!resp.ok) throw new Error(`服务器下载失败 (${resp.status})`);
 
       const total = Number(resp.headers.get('Content-Length')) || 0;
+      const responseSource = resp.headers.get('X-Marginalia-Cache') || 'network';
+      const loadingLabel = responseSource === 'hit' ? '正在读取 EPUB 缓存…' : '正在下载 EPUB…';
       if (!resp.body || !resp.body.getReader) {
-        setReaderLoading('正在下载 EPUB…', total ? `${Math.round(total / 1024 / 1024 * 10) / 10} MB` : '远程书籍可能需要多等几秒');
-        return await resp.arrayBuffer();
+        setReaderLoading(loadingLabel, total ? `${Math.round(total / 1024 / 1024 * 10) / 10} MB` : '远程书籍可能需要多等几秒');
+        return { arrayBuffer: await resp.arrayBuffer(), source: responseSource };
       }
 
       const reader = resp.body.getReader();
@@ -1704,7 +2004,7 @@
         const detail = total
           ? `${Math.round(loaded / 1024 / 1024 * 10) / 10} MB / ${Math.round(total / 1024 / 1024 * 10) / 10} MB`
           : `已下载 ${Math.round(loaded / 1024 / 1024 * 10) / 10} MB`;
-        setReaderLoading('正在下载 EPUB…', detail);
+        setReaderLoading(loadingLabel, detail);
         if (total) setLoadingProgress(10 + (loaded / total) * 45);
       }
       const merged = new Uint8Array(loaded);
@@ -1713,7 +2013,7 @@
         merged.set(chunk, offset);
         offset += chunk.byteLength;
       }
-      return merged.buffer;
+      return { arrayBuffer: merged.buffer, source: responseSource };
     } catch (err) {
       if (err && err.name === 'AbortError') {
         throw new Error('EPUB 下载超时，请检查远程网络后重试');
@@ -1724,8 +2024,8 @@
     }
   }
 
-  async function openBook(bookMeta, { skipSync = false } = {}) {
-    showReader();
+  async function openBook(bookMeta, { skipSync = false, historyMode = 'push' } = {}) {
+    showReader({ historyMode, bookId: bookMeta.id });
     setReaderLoading('正在打开书籍…', '正在准备阅读器');
     setLoadingProgress(5);
     const isServerBook = Boolean(
@@ -1769,14 +2069,17 @@
       currentBookUrl = null;
 
       let book;
-      if (bookMeta.file_blob) {
+      if (hasFreshLocalEpub(bookMeta)) {
+        setReaderLoading('正在从本机打开…', 'EPUB 已保存在此设备');
         // Imported devices keep an offline copy even though the canonical source is the server.
         const blob = new Blob([bookMeta.file_blob], { type: 'application/epub+zip' });
         const url = URL.createObjectURL(blob);
         currentBookUrl = url;
         book = ePub(url, { openAs: 'epub' });
-      } else if (bookMeta.server_book_id || bookMeta.source === 'server' || bookMeta._source === 'server') {
-        const arrayBuffer = await downloadServerEpub(bookMeta);
+      } else if (isServerBookRecord(bookMeta)) {
+        const download = await downloadServerEpub(bookMeta);
+        const arrayBuffer = download.arrayBuffer;
+        await persistServerEpub(bookMeta, arrayBuffer);
         const blob = new Blob([arrayBuffer], { type: 'application/epub+zip' });
         const url = URL.createObjectURL(blob);
         currentBookUrl = url;
@@ -1801,6 +2104,7 @@
       if (!dom.readerLoading.isConnected) dom.epubContainer.appendChild(dom.readerLoading);
       currentRendition = rendition;
       _boundIframeDocuments = new WeakSet();
+      applyReaderTypography({ refresh: false });
 
       // Track chapter/location changes
       rendition.on('relocated', (location) => {
@@ -1813,6 +2117,14 @@
 
       rendition.on('rendered', () => {
         setupIframeNavigation();
+        ttsFollowDocumentCache = null;
+        if (isTtsNavigationLocked() && !ttsFollowNavigationInProgress) {
+          window.setTimeout(() => updateTtsFollowHighlight({
+            force: true,
+            source: 'render',
+            navigation: 'none',
+          }), 0);
+        }
       });
 
       // Setup highlight selection handling
@@ -1877,6 +2189,12 @@
   function handleLocationChange(location) {
     if (!location || !location.start) return;
     currentCfi = location.start.cfi;
+    const nextChapterId = String(location.start.href || '').split('#', 1)[0];
+    if (currentChapterId && nextChapterId && currentChapterId !== nextChapterId) {
+      stopTtsForChapter({ resetTask: true });
+    }
+    if (nextChapterId) currentChapterId = nextChapterId;
+    updateChapterLabel(location);
     let percent = location.start.percentage;
     if (percent == null) {
       percent = percentageFromCfi(currentCfi);
@@ -1915,9 +2233,6 @@
         }
       }
     }
-
-    // Try to get chapter title from TOC
-    updateChapterLabel(location);
   }
 
   function releaseTransferredProgressFloor() {
@@ -1987,11 +2302,11 @@
     updateProgressUI();
   }
 
-  function refreshReaderLayout() {
+  function refreshReaderLayout({ anchorCfi: requestedAnchorCfi = '' } = {}) {
     if (!currentRendition || !dom.epubContainer) return;
     const refreshToken = ++layoutRefreshToken;
     const navigationToken = pageNavigationToken;
-    const anchorCfi = getCurrentAnchorCfi();
+    const anchorCfi = requestedAnchorCfi || getCurrentAnchorCfi();
     isLayoutRefreshing = true;
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
@@ -2107,9 +2422,49 @@
       || tagName === 'select';
   }
 
+  function isTtsNavigationLocked() {
+    return Boolean(ttsWantsPlay || ttsIsPlaying || ttsPlaybackStarting);
+  }
+
+  function showTtsNavigationLockedNotice() {
+    const now = Date.now();
+    if (now - ttsNavigationNoticeAt < 1200) return;
+    ttsNavigationNoticeAt = now;
+    showToast('朗读跟随中，请先暂停再翻页', 'info');
+  }
+
+  function syncReaderNavigationControls() {
+    const locked = isTtsNavigationLocked();
+    if (dom.readerView) {
+      dom.readerView.classList.toggle('tts-navigation-locked', locked);
+      dom.readerView.setAttribute('aria-busy', String(locked));
+    }
+    const pageButtonsDisabled = locked || pageNavigationControlsForcedDisabled || isLayoutRefreshing;
+    if (dom.btnNavPrev) {
+      dom.btnNavPrev.disabled = pageButtonsDisabled;
+      dom.btnNavPrev.title = locked ? '朗读跟随中，请先暂停' : '上一页';
+    }
+    if (dom.btnNavNext) {
+      dom.btnNavNext.disabled = pageButtonsDisabled;
+      dom.btnNavNext.title = locked ? '朗读跟随中，请先暂停' : '下一页';
+    }
+    if (dom.progressSlider) {
+      const locations = currentBook && currentBook.locations;
+      dom.progressSlider.disabled = locked || progressJumpInProgress || getLocationCount(locations) <= 0;
+      dom.progressSlider.title = locked ? '朗读跟随中，请先暂停后跳转' : '';
+    }
+  }
+
+  function blockManualNavigationDuringTts() {
+    if (!isTtsNavigationLocked()) return false;
+    showTtsNavigationLockedNotice();
+    syncReaderNavigationControls();
+    return true;
+  }
+
   function setPageNavigationDisabled(disabled) {
-    if (dom.btnNavPrev) dom.btnNavPrev.disabled = disabled;
-    if (dom.btnNavNext) dom.btnNavNext.disabled = disabled;
+    pageNavigationControlsForcedDisabled = disabled;
+    syncReaderNavigationControls();
   }
 
   function navigatePageWhenReady(direction, source, attempt = 0) {
@@ -2124,6 +2479,7 @@
   }
 
   function navigatePage(direction, source) {
+    if (blockManualNavigationDuringTts()) return Promise.resolve(false);
     if (!currentRendition || pageNavigationInProgress || isLayoutRefreshing) return Promise.resolve(false);
     if (direction !== 'next' && direction !== 'prev') return Promise.resolve(false);
 
@@ -2212,7 +2568,7 @@
     if (getLocationCount(book.locations) > 0) {
       locationsReadyBook = book;
       locationsReadyPromise = Promise.resolve();
-      dom.progressSlider.disabled = false;
+      syncReaderNavigationControls();
       updatePageUI();
       return locationsReadyPromise;
     }
@@ -2220,7 +2576,7 @@
     locationsReadyBook = book;
     locationsReadyPromise = book.locations.generate(1000)
       .then(() => {
-        dom.progressSlider.disabled = false;
+        syncReaderNavigationControls();
         updatePageUI();
       })
       .catch((err) => {
@@ -2234,6 +2590,10 @@
   }
 
   async function jumpToProgress(percent) {
+    if (blockManualNavigationDuringTts()) {
+      updateProgressUI();
+      return;
+    }
     if (!currentRendition || !currentRendition.book || !currentRendition.book.locations) return;
     releaseTransferredProgressFloor();
     const jumpToken = ++progressJumpToken;
@@ -2241,7 +2601,8 @@
 
     try {
       const locations = currentRendition.book.locations;
-      dom.progressSlider.disabled = true;
+      progressJumpInProgress = true;
+      syncReaderNavigationControls();
       dom.progressText.textContent = getLocationCount(locations) > 0 ? '跳转中...' : '定位中...';
       setReaderLoading('正在跳转...', '正在定位目标位置');
       await warmLocationsWithProgress(currentRendition.book);
@@ -2267,7 +2628,8 @@
       updateProgressUI();
     } finally {
       if (jumpToken === progressJumpToken) {
-        dom.progressSlider.disabled = false;
+        progressJumpInProgress = false;
+        syncReaderNavigationControls();
         hideReaderLoading();
       }
     }
@@ -3042,6 +3404,607 @@
       });
   }
 
+  // ==================== AUTOMATIC NARRATION ====================
+  function ttsErrorMessage(payload, fallback = '自动朗读暂时不可用') {
+    const detail = payload && payload.detail;
+    if (detail && typeof detail.message === 'string') return detail.message;
+    if (typeof detail === 'string') return detail;
+    return fallback;
+  }
+
+  function setTtsStatus(message, state = '') {
+    dom.ttsStatus.textContent = message;
+    dom.ttsStatus.dataset.state = state;
+    syncReaderNavigationControls();
+  }
+
+  function formatAudioTime(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return '00:00';
+    const rounded = Math.floor(seconds);
+    return `${String(Math.floor(rounded / 60)).padStart(2, '0')}:${String(rounded % 60).padStart(2, '0')}`;
+  }
+
+  function compactTtsText(value) {
+    return String(value || '')
+      .replace(/[\u00a0\u3000]/g, ' ')
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+      .replace(/\s+/g, '');
+  }
+
+  function isTtsContentElementVisible(element) {
+    if (!element || element.hidden || element.getAttribute('aria-hidden') === 'true') return false;
+    if (element.closest('script, style, noscript, nav, form, button, input, select, textarea, svg, canvas, iframe, audio, video, footer')) return false;
+    const attrs = ['id', 'class', 'role'].map(name => element.getAttribute(name) || '').join(' ');
+    if (/(^|[-_\s])(nav|menu|toolbar|breadcrumb|pagination|controls?|buttons?)([-_\s]|$)/i.test(attrs)) return false;
+    const style = String(element.getAttribute('style') || '').replace(/\s/g, '').toLowerCase();
+    return !style.includes('display:none') && !style.includes('visibility:hidden');
+  }
+
+  function buildTtsDocumentIndex(doc) {
+    if (!doc || !doc.body) return null;
+    const blocks = Array.from(doc.body.querySelectorAll(TTS_CONTENT_BLOCK_SELECTOR)).filter(element => {
+      const parentBlock = element.parentElement && element.parentElement.closest(TTS_CONTENT_BLOCK_SELECTOR);
+      return !parentBlock && isTtsContentElementVisible(element);
+    });
+    const roots = blocks.length ? blocks : [doc.body];
+    const characters = [];
+    const points = [];
+    const nodeFilter = doc.defaultView && doc.defaultView.NodeFilter
+      ? doc.defaultView.NodeFilter
+      : NodeFilter;
+
+    for (const root of roots) {
+      const walker = doc.createTreeWalker(root, nodeFilter.SHOW_TEXT);
+      let textNode;
+      while ((textNode = walker.nextNode())) {
+        const parent = textNode.parentElement;
+        if (!parent || !isTtsContentElementVisible(parent)) continue;
+        const value = String(textNode.nodeValue || '');
+        for (let offset = 0; offset < value.length; offset += 1) {
+          const character = value[offset].replace(/[\u00a0\u3000]/g, ' ');
+          if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\s]/.test(character)) continue;
+          characters.push(character);
+          points.push({ node: textNode, offset });
+        }
+      }
+    }
+    return { doc, text: characters.join(''), points };
+  }
+
+  function getTtsFollowCache() {
+    const iframe = findReaderIframes()[0];
+    const doc = iframe && iframe.contentDocument;
+    if (!doc || !ttsTask) return null;
+    if (
+      ttsFollowDocumentCache &&
+      ttsFollowDocumentCache.doc === doc &&
+      ttsFollowDocumentCache.taskId === ttsTask.taskId
+    ) return ttsFollowDocumentCache;
+
+    const documentIndex = buildTtsDocumentIndex(doc);
+    if (!documentIndex) return null;
+    const mappings = new Map();
+    let cursor = 0;
+    const segments = [...(ttsTask.segments || [])].sort((a, b) => Number(a.index) - Number(b.index));
+    for (const segment of segments) {
+      const compact = compactTtsText(segment.text);
+      if (!compact) continue;
+      let start = documentIndex.text.indexOf(compact, cursor);
+      if (start < 0) start = documentIndex.text.indexOf(compact);
+      if (start < 0) continue;
+      mappings.set(Number(segment.index), { start, end: start + compact.length, segment });
+      cursor = start + compact.length;
+    }
+    ttsFollowDocumentCache = {
+      doc,
+      taskId: ttsTask.taskId,
+      documentIndex,
+      mappings,
+    };
+    return ttsFollowDocumentCache;
+  }
+
+  function ttsRangeForCue(segment, cue) {
+    const cache = getTtsFollowCache();
+    const mapping = cache && cache.mappings.get(Number(segment.index));
+    if (!cache || !mapping) return null;
+    const cueStart = cue ? compactTtsText(segment.text.slice(0, Number(cue.start) || 0)).length : 0;
+    const cueEnd = cue
+      ? compactTtsText(segment.text.slice(0, Number(cue.end) || 0)).length
+      : mapping.end - mapping.start;
+    const startIndex = mapping.start + cueStart;
+    const endIndex = Math.max(startIndex + 1, mapping.start + cueEnd);
+    const startPoint = cache.documentIndex.points[startIndex];
+    const endPoint = cache.documentIndex.points[endIndex - 1];
+    if (!startPoint || !endPoint) return null;
+    try {
+      const range = cache.doc.createRange();
+      range.setStart(startPoint.node, startPoint.offset);
+      range.setEnd(endPoint.node, endPoint.offset + 1);
+      return range;
+    } catch (_err) {
+      return null;
+    }
+  }
+
+  function removeTtsFollowAnnotations(cfi) {
+    if (!cfi || !currentRendition || !currentRendition.annotations) return;
+    try { currentRendition.annotations.remove(cfi, 'highlight'); } catch (_err) {}
+    try { currentRendition.annotations.remove(cfi, 'underline'); } catch (_err) {}
+  }
+
+  function cancelPendingTtsFollowNavigation() {
+    if (!ttsFollowPendingNavigation) return;
+    ttsFollowPendingNavigation.resolve(false);
+    ttsFollowPendingNavigation = null;
+  }
+
+  function pauseTtsFollowNavigation() {
+    ttsFollowUpdateToken += 1;
+    cancelPendingTtsFollowNavigation();
+  }
+
+  function clearTtsFollowHighlight({ restorePersistent = false } = {}) {
+    pauseTtsFollowNavigation();
+    removeTtsFollowAnnotations(ttsFollowCfi);
+    ttsFollowCfi = '';
+    ttsFollowCueKey = '';
+    for (const iframe of findReaderIframes()) {
+      try {
+        iframe.contentDocument.documentElement.classList.remove('tts-follow-active');
+        delete iframe.contentDocument.documentElement.dataset.ttsFollowText;
+        delete iframe.contentDocument.documentElement.dataset.ttsFollowSource;
+      } catch (_err) { /* ignore inaccessible frames */ }
+    }
+    if (restorePersistent) restoreHighlights();
+  }
+
+  function isRangeVisibleInReader(range) {
+    if (!range) return false;
+    const doc = range.commonAncestorContainer.ownerDocument;
+    const iframe = getIframeForDocument(doc);
+    if (!iframe || !dom.epubContainer) return false;
+    const frameRect = iframe.getBoundingClientRect();
+    const hostRect = dom.epubContainer.getBoundingClientRect();
+    return Array.from(range.getClientRects()).some(rect => {
+      const left = frameRect.left + rect.left;
+      const right = frameRect.left + rect.right;
+      const top = frameRect.top + rect.top;
+      const bottom = frameRect.top + rect.bottom;
+      return right > hostRect.left && left < hostRect.right && bottom > hostRect.top && top < hostRect.bottom;
+    });
+  }
+
+  async function drainTtsFollowNavigationQueue() {
+    ttsFollowNavigationInProgress = true;
+    try {
+      while (ttsFollowPendingNavigation) {
+        const request = ttsFollowPendingNavigation;
+        ttsFollowPendingNavigation = null;
+        let displayed = false;
+        try {
+          if (request.updateToken !== ttsFollowUpdateToken || !isTtsNavigationLocked()) {
+            request.resolve(false);
+            continue;
+          }
+          await currentRendition.display(request.cfi);
+          displayed = true;
+        } catch (err) {
+          console.warn('TTS follow navigation failed:', err);
+        }
+        const isLatest = !ttsFollowPendingNavigation &&
+          request.updateToken === ttsFollowUpdateToken &&
+          isTtsNavigationLocked();
+        request.resolve(displayed && isLatest);
+      }
+    } finally {
+      ttsFollowNavigationInProgress = false;
+      ttsFollowNavigationWorker = null;
+      if (ttsFollowPendingNavigation) {
+        ttsFollowNavigationWorker = drainTtsFollowNavigationQueue();
+      }
+    }
+  }
+
+  function queueTtsFollowNavigation(cfi, updateToken) {
+    return new Promise((resolve) => {
+      if (ttsFollowPendingNavigation) {
+        ttsFollowPendingNavigation.resolve(false);
+      }
+      ttsFollowPendingNavigation = { cfi, updateToken, resolve };
+      if (!ttsFollowNavigationWorker) {
+        ttsFollowNavigationWorker = drainTtsFollowNavigationQueue();
+      }
+    });
+  }
+
+  async function updateTtsFollowHighlight({
+    force = false,
+    source = 'timeline',
+    navigation = 'if-needed',
+  } = {}) {
+    const segment = readyTtsSegment(ttsSegmentIndex);
+    if (!segment || !currentRendition || ttsChapterId !== currentChapterId) return;
+    const cues = Array.isArray(segment.cues) ? segment.cues : [];
+    const currentMs = Math.max(0, Number(dom.ttsAudio.currentTime || 0) * 1000);
+    let cueIndex = -1;
+    for (let index = 0; index < cues.length; index += 1) {
+      if (Number(cues[index].startMs || 0) <= currentMs + 20) cueIndex = index;
+      else break;
+    }
+    if (cues.length && cueIndex < 0) cueIndex = 0;
+    const cue = cueIndex >= 0 ? cues[cueIndex] : null;
+    const cueKey = `${ttsTask.taskId}:${ttsSegmentIndex}:${cueIndex}`;
+    if (!force && cueKey === ttsFollowCueKey) return;
+
+    const range = ttsRangeForCue(segment, cue) || ttsRangeForCue(segment, null);
+    if (!range) return;
+    const cfi = cfiFromIframeRange(range);
+    if (!cfi) return;
+    const updateToken = ++ttsFollowUpdateToken;
+    const previousFollowCfi = ttsFollowCfi;
+    ttsFollowCueKey = cueKey;
+
+    const navigationLocked = isTtsNavigationLocked();
+    const mustNavigate = navigation === 'force' && navigationLocked;
+    const shouldNavigate = navigation === 'if-needed' && navigationLocked && !isRangeVisibleInReader(range);
+    if (mustNavigate || shouldNavigate) {
+      const followedLatestPosition = await queueTtsFollowNavigation(cfi, updateToken);
+      if (!followedLatestPosition) return;
+    }
+    if (updateToken !== ttsFollowUpdateToken || !currentRendition || !currentRendition.annotations) return;
+    removeTtsFollowAnnotations(previousFollowCfi);
+    ttsFollowCfi = cfi;
+    const activeRange = ttsRangeForCue(segment, cue) || range;
+    try {
+      currentRendition.annotations.highlight(
+        cfi,
+        { ttsFollow: true, source },
+        null,
+        TTS_FOLLOW_CLASS,
+        {
+          fill: 'rgb(224, 128, 43)',
+          'fill-opacity': '0.24',
+          stroke: 'rgb(183, 91, 23)',
+          'stroke-opacity': '0.28',
+        }
+      );
+      if (typeof currentRendition.annotations.underline === 'function') {
+        currentRendition.annotations.underline(
+          cfi,
+          { ttsFollow: true, source },
+          null,
+          TTS_FOLLOW_UNDERLINE_CLASS,
+          {
+            stroke: 'rgb(171, 82, 19)',
+            'stroke-opacity': '0.96',
+            'stroke-width': '2.4',
+          }
+        );
+      }
+      const doc = activeRange.commonAncestorContainer.ownerDocument;
+      doc.documentElement.classList.add('tts-follow-active');
+      doc.documentElement.dataset.ttsFollowText = cue ? cue.text : segment.text;
+      doc.documentElement.dataset.ttsFollowSource = source;
+    } catch (err) {
+      console.warn('TTS follow highlight failed:', err);
+    }
+  }
+
+  function getSavedTtsPosition() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(TTS_POSITION_KEY) || 'null');
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (_err) {
+      return null;
+    }
+  }
+
+  function saveTtsPosition(force = false) {
+    if (!currentBookMeta || !ttsChapterId || !ttsTask) return;
+    const now = Date.now();
+    if (!force && now - ttsLastSavedAt < 1000) return;
+    ttsLastSavedAt = now;
+    try {
+      localStorage.setItem(TTS_POSITION_KEY, JSON.stringify({
+        book_id: currentBookMeta.id,
+        chapter_id: ttsChapterId,
+        segment_index: ttsSegmentIndex,
+        current_time: Number(dom.ttsAudio.currentTime || 0),
+        voice: dom.ttsVoice.value,
+        rate: Number(dom.ttsRate.value),
+      }));
+    } catch (_err) {
+      // Playback continues if localStorage is unavailable.
+    }
+  }
+
+  function clearTtsPoll() {
+    if (ttsPollTimer) clearTimeout(ttsPollTimer);
+    ttsPollTimer = null;
+  }
+
+  function stopTtsForChapter({ resetTask = false } = {}) {
+    clearTtsPoll();
+    saveTtsPosition(true);
+    ttsWantsPlay = false;
+    ttsIsPlaying = false;
+    ttsPlaybackStarting = false;
+    clearTtsFollowHighlight({ restorePersistent: true });
+    ttsFollowDocumentCache = null;
+    dom.ttsAudio.pause();
+    dom.ttsAudio.removeAttribute('src');
+    dom.ttsAudio.dataset.segmentIndex = '';
+    dom.ttsAudio.load();
+    dom.ttsProgress.value = '0';
+    dom.ttsProgress.disabled = true;
+    dom.ttsTime.textContent = '00:00 / 00:00';
+    if (resetTask) {
+      ttsTask = null;
+      ttsChapterId = '';
+      ttsSegmentIndex = 0;
+      dom.ttsSegmentLabel.textContent = '第 0 / 0 段';
+      dom.btnTtsPlay.disabled = true;
+      dom.btnTtsPause.disabled = true;
+      dom.btnTtsPrev.disabled = true;
+      dom.btnTtsNext.disabled = true;
+      setTtsStatus('选择声音后朗读当前章节');
+    }
+    syncReaderNavigationControls();
+  }
+
+  function setTtsPanelOpen(open) {
+    if (open) {
+      setReaderChromeVisible(true);
+      cancelReaderChromeHide();
+      closeOtherMobileReaderPanels('tts');
+      setReaderToolsOpen(false, { skipChromeSchedule: true });
+      ttsRestoredPosition = getSavedTtsPosition();
+    }
+    dom.ttsPanel.hidden = !open;
+    syncReaderToolStates();
+    syncReaderPanelBackdrop();
+    if (!open) scheduleReaderChromeHide();
+  }
+
+  function toggleTtsPanel() {
+    setTtsPanelOpen(dom.ttsPanel.hidden);
+  }
+
+  async function loadTtsVoices() {
+    try {
+      const response = await fetchWithTimeout(API_BASE + '/api/tts/voices');
+      if (!response.ok) throw new Error(`Server responded with ${response.status}`);
+      const data = await response.json();
+      if (!data.enabled) {
+        dom.btnToggleTts.disabled = true;
+        setTtsStatus('自动朗读功能已关闭', 'failed');
+        return;
+      }
+      const saved = getSavedTtsPosition();
+      dom.ttsVoice.innerHTML = (data.voices || []).map(voice => (
+        `<option value="${escapeHTML(voice.id)}">${escapeHTML(voice.name)}</option>`
+      )).join('');
+      const preferred = saved && (data.voices || []).some(voice => voice.id === saved.voice)
+        ? saved.voice
+        : data.defaultVoice;
+      if (preferred) dom.ttsVoice.value = preferred;
+      if (saved && [0.75, 1, 1.25, 1.5, 2].includes(Number(saved.rate))) {
+        dom.ttsRate.value = String(Number(saved.rate));
+      }
+    } catch (err) {
+      console.warn('Failed to load TTS voices:', err);
+      setTtsStatus('无法读取朗读声音列表', 'failed');
+    }
+  }
+
+  async function startChapterTts({ autoplay = true } = {}) {
+    if (!currentBookMeta || !currentChapterId) {
+      showToast('当前章节尚未加载完成', 'info');
+      return;
+    }
+    const bookId = currentBookMeta.server_book_id || (
+      currentBookMeta.source === 'server' || currentBookMeta._source === 'server'
+        ? currentBookMeta.id
+        : null
+    );
+    if (!bookId) {
+      showToast('请等待书籍上传服务器后再使用朗读', 'warning');
+      return;
+    }
+
+    stopTtsForChapter({ resetTask: true });
+    ttsChapterId = currentChapterId;
+    ttsWantsPlay = autoplay;
+    dom.btnTtsStart.disabled = true;
+    setTtsStatus('正在清理正文并生成第一段…', 'generating');
+    try {
+      const response = await fetchWithTimeout(
+        API_BASE + '/api/books/' + encodeURIComponent(bookId) + '/chapters/' +
+          encodeURIComponent(ttsChapterId) + '/tts',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            voice: dom.ttsVoice.value,
+            rate: Number(dom.ttsRate.value),
+          }),
+        },
+        30000
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(ttsErrorMessage(payload));
+      if (ttsChapterId !== currentChapterId) return;
+      ttsTask = payload;
+      ttsFollowDocumentCache = null;
+      const saved = ttsRestoredPosition || getSavedTtsPosition();
+      const canRestore = saved &&
+        saved.book_id === currentBookMeta.id &&
+        saved.chapter_id === ttsChapterId &&
+        saved.voice === dom.ttsVoice.value &&
+        Number(saved.rate) === Number(dom.ttsRate.value);
+      ttsSegmentIndex = canRestore
+        ? Math.max(0, Math.min(Number(saved.segment_index) || 0, payload.segmentCount - 1))
+        : 0;
+      ttsRestoredPosition = canRestore ? saved : null;
+      applyTtsTask(payload);
+    } catch (err) {
+      console.error('TTS task creation failed:', err);
+      ttsWantsPlay = false;
+      ttsIsPlaying = false;
+      ttsPlaybackStarting = false;
+      clearTtsFollowHighlight({ restorePersistent: true });
+      setTtsStatus(err.message || '朗读任务创建失败', 'failed');
+      showToast(err.message || '朗读任务创建失败', 'error');
+    } finally {
+      dom.btnTtsStart.disabled = false;
+    }
+  }
+
+  function readyTtsSegment(index) {
+    return ttsTask && (ttsTask.segments || []).find(segment => Number(segment.index) === index);
+  }
+
+  function scheduleTtsPoll() {
+    clearTtsPoll();
+    if (!ttsTask || ttsTask.status === 'failed') return;
+    if (ttsTask.status === 'completed' && !ttsWantsPlay) return;
+    const taskId = ttsTask.taskId;
+    ttsPollTimer = setTimeout(() => pollTtsTask(taskId), TTS_POLL_INTERVAL_MS);
+  }
+
+  async function pollTtsTask(taskId) {
+    ttsPollTimer = null;
+    if (!ttsTask || ttsTask.taskId !== taskId) return;
+    try {
+      const response = await fetchWithTimeout(
+        API_BASE + '/api/tts/tasks/' + encodeURIComponent(taskId), {}, 10000
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(ttsErrorMessage(payload, '无法读取朗读生成状态'));
+      if (!ttsTask || ttsTask.taskId !== taskId || ttsChapterId !== currentChapterId) return;
+      ttsTask = payload;
+      ttsFollowDocumentCache = null;
+      applyTtsTask(payload);
+    } catch (err) {
+      ttsWantsPlay = false;
+      ttsIsPlaying = false;
+      ttsPlaybackStarting = false;
+      dom.ttsAudio.pause();
+      clearTtsFollowHighlight({ restorePersistent: true });
+      setTtsStatus(err.message || '朗读状态查询失败', 'failed');
+    }
+  }
+
+  function applyTtsTask(task) {
+    const total = Number(task.segmentCount || 0);
+    const completed = Number(task.completedSegments || 0);
+    dom.ttsSegmentLabel.textContent = total
+      ? `第 ${Math.min(ttsSegmentIndex + 1, total)} / ${total} 段`
+      : '第 0 / 0 段';
+    dom.btnTtsPrev.disabled = !total || ttsSegmentIndex <= 0;
+    dom.btnTtsNext.disabled = !total || ttsSegmentIndex >= total - 1;
+    dom.btnTtsPlay.disabled = !total;
+    dom.btnTtsPause.disabled = !total;
+
+    if (task.status === 'failed') {
+      ttsWantsPlay = false;
+      ttsIsPlaying = false;
+      ttsPlaybackStarting = false;
+      dom.ttsAudio.pause();
+      clearTtsFollowHighlight({ restorePersistent: true });
+      setTtsStatus(task.error || '语音生成失败，请重试', 'failed');
+      return;
+    }
+    const segment = readyTtsSegment(ttsSegmentIndex);
+    if (ttsWantsPlay && segment) {
+      playTtsSegment(ttsSegmentIndex, true);
+    } else if (ttsWantsPlay) {
+      setTtsStatus(`第 ${ttsSegmentIndex + 1} 段生成中，跟随定位与翻页锁定已开启…`, 'generating');
+    } else if (ttsIsPlaying) {
+      setTtsStatus(
+        task.status === 'completed'
+          ? `正在播放第 ${ttsSegmentIndex + 1} 段 · 跟随原文，暂停后可翻页`
+          : `正在播放第 ${ttsSegmentIndex + 1} 段 · 跟随原文，后续仍在生成`,
+        'playing'
+      );
+    } else if (task.status === 'completed') {
+      setTtsStatus(`全部 ${total} 段已缓存，可直接播放`, 'completed');
+    } else {
+      setTtsStatus(`已生成 ${completed}/${total} 段，后台继续生成…`, 'generating');
+    }
+    if (task.status !== 'completed' || (ttsWantsPlay && !segment)) scheduleTtsPoll();
+  }
+
+  async function playTtsSegment(index, autoplay = true) {
+    if (!ttsTask) return;
+    const segment = readyTtsSegment(index);
+    ttsSegmentIndex = Math.max(0, Math.min(index, Number(ttsTask.segmentCount || 1) - 1));
+    ttsFollowCueKey = '';
+    if (segment && autoplay) {
+      ttsWantsPlay = false;
+      ttsPlaybackStarting = true;
+    }
+    applyTtsTask({ ...ttsTask, status: ttsTask.status });
+    if (!segment) {
+      ttsPlaybackStarting = false;
+      ttsWantsPlay = autoplay;
+      setTtsStatus(`第 ${ttsSegmentIndex + 1} 段仍在生成，请稍候…`, 'generating');
+      scheduleTtsPoll();
+      return;
+    }
+    const segmentKey = String(ttsSegmentIndex);
+    if (dom.ttsAudio.dataset.segmentIndex !== segmentKey) {
+      dom.ttsAudio.pause();
+      dom.ttsAudio.src = segment.audioUrl;
+      dom.ttsAudio.dataset.segmentIndex = segmentKey;
+      dom.ttsAudio.load();
+      dom.ttsProgress.value = '0';
+      const restored = ttsRestoredPosition;
+      if (restored && Number(restored.segment_index) === ttsSegmentIndex) {
+        dom.ttsAudio.addEventListener('loadedmetadata', () => {
+          dom.ttsAudio.currentTime = Math.min(
+            Number(restored.current_time) || 0,
+            Number.isFinite(dom.ttsAudio.duration) ? dom.ttsAudio.duration : Number(restored.current_time) || 0
+          );
+          ttsRestoredPosition = null;
+        }, { once: true });
+      }
+    }
+    dom.ttsSegmentLabel.textContent = `第 ${ttsSegmentIndex + 1} / ${ttsTask.segmentCount} 段`;
+    if (!autoplay) return;
+    ttsWantsPlay = false;
+    try {
+      await updateTtsFollowHighlight({
+        force: true,
+        source: 'start',
+        navigation: 'force',
+      });
+      await dom.ttsAudio.play();
+      ttsIsPlaying = true;
+      ttsPlaybackStarting = false;
+      setTtsStatus(
+        ttsTask.status === 'completed'
+          ? `正在播放第 ${ttsSegmentIndex + 1} 段 · 跟随原文，暂停后可翻页`
+          : `正在播放第 ${ttsSegmentIndex + 1} 段 · 跟随原文，后续仍在生成`,
+        'playing'
+      );
+    } catch (err) {
+      ttsIsPlaying = false;
+      ttsPlaybackStarting = false;
+      console.warn('Audio autoplay was blocked:', err);
+      setTtsStatus('音频已就绪，请点“播放”继续', 'ready');
+    }
+  }
+
+  function handleTtsOptionChange() {
+    if (!ttsTask) return;
+    // Do not save the old audio position under the newly selected options.
+    ttsTask = null;
+    stopTtsForChapter({ resetTask: true });
+    setTtsStatus('声音或语速已变化，请重新点击朗读');
+  }
+
   // ==================== SEARCH ====================
   function setSearchPanelOpen(open, { clearOnClose = true } = {}) {
     if (open) {
@@ -3114,6 +4077,7 @@
         <div class="search-result-meta">点击跳转</div>
       `;
       item.addEventListener('click', () => {
+        if (blockManualNavigationDuringTts()) return;
         currentRendition.display(result.cfi);
         if (isMobileLayout()) {
           setSearchPanelOpen(false, { clearOnClose: false });
@@ -3175,6 +4139,7 @@
           }
           textNode.parentNode.replaceChild(fragment, textNode);
         }
+        ttsFollowDocumentCache = null;
       }
     } catch (e) {
       console.warn('Search highlight failed:', e);
@@ -3191,6 +4156,7 @@
           parent.replaceChild(document.createTextNode(mark.textContent), mark);
           parent.normalize();
         }
+        if (marks.length) ttsFollowDocumentCache = null;
       }
     } catch (e) { /* ignore */ }
   }
@@ -3219,18 +4185,15 @@
     fontZoomLockUntil = Date.now() + WHEEL_IDLE_MS;
     resetWheelGesture();
 
-    if (delta > 0) {
-      currentFontSize = Math.max(FONT_SIZE_MIN, currentFontSize - FONT_SIZE_STEP);
-    } else {
-      currentFontSize = Math.min(FONT_SIZE_MAX, currentFontSize + FONT_SIZE_STEP);
-    }
-
-    currentRendition.themes.fontSize(currentFontSize + '%');
+    const direction = delta > 0 ? -1 : 1;
+    setReaderFontSize(currentFontSize + direction * FONT_SIZE_STEP);
   }
 
   // ==================== HIGHLIGHTING / SELECTION ====================
   function enableIframeTextSelection(doc) {
-    if (!doc || !doc.head || doc.getElementById('marginalia-selection-style')) return;
+    if (!doc || !doc.head) return;
+    applyReaderTypographyToDocument(doc);
+    if (doc.getElementById('marginalia-selection-style')) return;
     const style = doc.createElement('style');
     style.id = 'marginalia-selection-style';
     style.textContent = `
@@ -3243,6 +4206,37 @@
         touch-action: pan-y;
         touch-action: pan-y pinch-zoom;
         overscroll-behavior-x: contain;
+      }
+      :where(html, body) {
+        background: #fffaf0;
+        color: #292c27;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+      }
+      :where(body) {
+        font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", Georgia, serif;
+      }
+      :where(p, li, blockquote) {
+        line-height: 1.72;
+        orphans: 2;
+        widows: 2;
+      }
+      :where(a) {
+        color: #2f604a;
+        text-decoration-color: rgba(47, 96, 74, 0.38);
+        text-underline-offset: 0.16em;
+      }
+      :where(img, svg, video) {
+        max-width: 100%;
+        height: auto;
+      }
+      html.tts-follow-active .${TTS_FOLLOW_CLASS} {
+        mix-blend-mode: multiply;
+        pointer-events: none !important;
+      }
+      html.tts-follow-active .${TTS_FOLLOW_UNDERLINE_CLASS} {
+        filter: drop-shadow(0 1px 0 rgba(255, 250, 240, 0.72));
+        pointer-events: none !important;
       }
     `;
     doc.head.appendChild(style);
@@ -3794,6 +4788,7 @@
   }
 
   async function gotoBookmark(bookmark) {
+    if (blockManualNavigationDuringTts()) return;
     if (!currentRendition || !bookmark || !bookmark.cfi) return;
     try {
       await currentRendition.display(bookmark.cfi);
@@ -3884,6 +4879,7 @@
       });
 
       item.querySelector('[data-action="goto"]').addEventListener('click', async () => {
+        if (blockManualNavigationDuringTts()) return;
         if (!currentRendition || !h.cfi) return;
         try {
           // Try to navigate to the highlight's location
@@ -4280,6 +5276,7 @@
   }
 
   async function jumpToAiCitation(citation) {
+    if (blockManualNavigationDuringTts()) return;
     if (!currentRendition || !currentBook) return;
     try {
       let cfi = citation.cfi || '';
@@ -4424,7 +5421,7 @@
       await deleteBook(book.id);
       if (currentBookMeta && currentBookMeta.id === book.id) {
         showToast('这本书已从服务器删除', 'warning');
-        await showLibrary();
+        await showHome({ historyMode: 'replace' });
       }
       return null;
     }
@@ -4772,7 +5769,7 @@
 
   // ==================== EVENT BINDINGS ====================
   function bindEvents() {
-    [dom.readerToolbar, dom.readerFooter, dom.readerToolPanel, dom.appNav].forEach((element) => {
+    [dom.readerToolbar, dom.readerFooter, dom.readerToolPanel].forEach((element) => {
       if (!element) return;
       element.addEventListener('pointerdown', () => {
         if (!dom.readerView.classList.contains('active')) return;
@@ -4786,17 +5783,7 @@
       element.addEventListener('focusout', () => setTimeout(() => scheduleReaderChromeHide(), 0));
     });
 
-    dom.btnNavLibrary.addEventListener('click', showLibrary);
-    dom.btnNavRead.addEventListener('click', () => {
-      if (currentBookMeta && currentRendition) {
-        showReader();
-      } else {
-        showLibrary();
-        showToast('请先从书库打开一本书', 'info');
-      }
-    });
-    dom.btnNavCreate.addEventListener('click', showCreation);
-    dom.btnLibraryCreate.addEventListener('click', showCreation);
+    dom.btnLibraryCreate.addEventListener('click', () => showCreation());
 
     // File import
     dom.fileInput.addEventListener('change', (e) => {
@@ -4805,8 +5792,9 @@
       dom.fileInput.value = '';
     });
 
-    // Back to library
-    dom.btnBack.addEventListener('click', showLibrary);
+    // Reading and creation are entered from, and return to, the home screen.
+    dom.btnBack.addEventListener('click', returnToHome);
+    dom.btnCreationBack.addEventListener('click', returnToHome);
 
     // AI book Q&A
     dom.btnReaderTools.addEventListener('click', toggleReaderTools);
@@ -4816,6 +5804,22 @@
     dom.aiForm.addEventListener('submit', (e) => {
       e.preventDefault();
       askBookQuestion(dom.aiQuestionInput.value);
+    });
+    dom.aiQuestionInput.addEventListener('paste', (e) => {
+      const pastedText = e.clipboardData?.getData('text/plain');
+      if (typeof pastedText !== 'string' || !/[\r\n]/.test(pastedText)) return;
+
+      e.preventDefault();
+      const normalizedText = pastedText.replace(/[ \t]*[\r\n]+[ \t]*/g, ' ');
+      const start = dom.aiQuestionInput.selectionStart ?? dom.aiQuestionInput.value.length;
+      const end = dom.aiQuestionInput.selectionEnd ?? start;
+      dom.aiQuestionInput.setRangeText(normalizedText, start, end, 'end');
+      dom.aiQuestionInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    dom.aiQuestionInput.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+      e.preventDefault();
+      dom.aiForm.requestSubmit();
     });
     dom.btnOperationClose.addEventListener('click', () => hideOperationStatus());
     dom.btnOperationRetry.addEventListener('click', async () => {
@@ -4875,8 +5879,103 @@
     dom.btnToggleReaderAutoHide.addEventListener('click', () => {
       setReaderChromeAutoHideEnabled(!readerChromeAutoHideEnabled);
     });
+    dom.readerFontFamily.addEventListener('change', () => {
+      setReaderFontFamily(dom.readerFontFamily.value);
+    });
+    dom.readerFontSize.addEventListener('input', () => {
+      setReaderFontSize(dom.readerFontSize.value);
+    });
+    dom.btnReaderFontDecrease.addEventListener('click', () => {
+      setReaderFontSize(currentFontSize - FONT_SIZE_STEP);
+    });
+    dom.btnReaderFontReset.addEventListener('click', () => {
+      setReaderFontSize(100);
+    });
+    dom.btnReaderFontIncrease.addEventListener('click', () => {
+      setReaderFontSize(currentFontSize + FONT_SIZE_STEP);
+    });
     dom.btnCloseNotesPanel.addEventListener('click', () => toggleNotesPanel(false));
     dom.readerPanelBackdrop.addEventListener('click', () => closeMobileReaderPanels({ restoreFocus: true }));
+
+    // Automatic narration
+    dom.btnToggleTts.addEventListener('click', toggleTtsPanel);
+    dom.btnCloseTts.addEventListener('click', () => setTtsPanelOpen(false));
+    dom.btnTtsStart.addEventListener('click', () => startChapterTts({ autoplay: true }));
+    dom.btnTtsPlay.addEventListener('click', () => {
+      if (!ttsTask) {
+        startChapterTts({ autoplay: true });
+      } else {
+        ttsWantsPlay = true;
+        playTtsSegment(ttsSegmentIndex, true);
+      }
+    });
+    dom.btnTtsPause.addEventListener('click', () => {
+      ttsWantsPlay = false;
+      ttsIsPlaying = false;
+      ttsPlaybackStarting = false;
+      pauseTtsFollowNavigation();
+      dom.ttsAudio.pause();
+      saveTtsPosition(true);
+      setTtsStatus(`已暂停第 ${ttsSegmentIndex + 1} 段`, 'paused');
+      if (ttsTask && ttsTask.status !== 'completed') scheduleTtsPoll();
+    });
+    dom.btnTtsPrev.addEventListener('click', () => {
+      saveTtsPosition(true);
+      ttsWantsPlay = true;
+      playTtsSegment(Math.max(0, ttsSegmentIndex - 1), true);
+    });
+    dom.btnTtsNext.addEventListener('click', () => {
+      if (!ttsTask) return;
+      saveTtsPosition(true);
+      ttsWantsPlay = true;
+      playTtsSegment(Math.min(ttsTask.segmentCount - 1, ttsSegmentIndex + 1), true);
+    });
+    dom.ttsVoice.addEventListener('change', handleTtsOptionChange);
+    dom.ttsRate.addEventListener('change', handleTtsOptionChange);
+    dom.ttsAudio.addEventListener('loadedmetadata', () => {
+      dom.ttsProgress.disabled = !Number.isFinite(dom.ttsAudio.duration);
+      dom.ttsTime.textContent = `${formatAudioTime(dom.ttsAudio.currentTime)} / ${formatAudioTime(dom.ttsAudio.duration)}`;
+    });
+    dom.ttsAudio.addEventListener('timeupdate', () => {
+      const duration = dom.ttsAudio.duration;
+      dom.ttsProgress.value = Number.isFinite(duration) && duration > 0
+        ? String(Math.round((dom.ttsAudio.currentTime / duration) * 1000))
+        : '0';
+      dom.ttsTime.textContent = `${formatAudioTime(dom.ttsAudio.currentTime)} / ${formatAudioTime(duration)}`;
+      updateTtsFollowHighlight({ source: 'timeline', navigation: 'force' });
+      saveTtsPosition();
+    });
+    dom.ttsAudio.addEventListener('ended', () => {
+      ttsIsPlaying = false;
+      saveTtsPosition(true);
+      if (dom.ttsContinuous.checked && ttsTask && ttsSegmentIndex + 1 < ttsTask.segmentCount) {
+        ttsWantsPlay = true;
+        playTtsSegment(ttsSegmentIndex + 1, true);
+      } else {
+        ttsWantsPlay = false;
+        ttsPlaybackStarting = false;
+        clearTtsFollowHighlight({ restorePersistent: true });
+        setTtsStatus('当前朗读已结束', 'completed');
+      }
+    });
+    dom.ttsAudio.addEventListener('error', () => {
+      if (!dom.ttsAudio.getAttribute('src')) return;
+      ttsWantsPlay = false;
+      ttsIsPlaying = false;
+      ttsPlaybackStarting = false;
+      clearTtsFollowHighlight({ restorePersistent: true });
+      setTtsStatus('音频加载失败，请重新生成或检查网络', 'failed');
+    });
+    dom.ttsProgress.addEventListener('input', () => {
+      if (!Number.isFinite(dom.ttsAudio.duration)) return;
+      dom.ttsAudio.currentTime = (Number(dom.ttsProgress.value) / 1000) * dom.ttsAudio.duration;
+      updateTtsFollowHighlight({
+        force: true,
+        source: 'seek',
+        navigation: isTtsNavigationLocked() ? 'force' : 'none',
+      });
+    });
+    dom.ttsProgress.addEventListener('change', () => saveTtsPosition(true));
 
     // Search
     dom.btnToggleSearch.addEventListener('click', toggleSearchPanel);
@@ -4959,6 +6058,8 @@
           closeNoteEditor();
         } else if (!dom.bookDeleteModal.hidden) {
           closeBookDeleteDialog();
+        } else if (!dom.ttsPanel.hidden) {
+          setTtsPanelOpen(false);
         } else if (closeMobileReaderPanels({ restoreFocus: true })) {
           // Mobile reader panels are modal surfaces and close before the tool menu.
         } else if (!dom.readerToolPanel.hidden) {
@@ -5002,6 +6103,12 @@
     });
 
     // Online/offline
+    window.addEventListener('popstate', (event) => {
+      handleHistoryNavigation(event).catch((err) => {
+        console.error('History navigation failed:', err);
+        showHome({ historyMode: 'replace' });
+      });
+    });
     window.addEventListener('online', async () => {
       showToast('网络已恢复，正在同步服务器书库', 'success');
       refreshServerLibrary().catch(() => {});
@@ -5025,6 +6132,14 @@
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         cancelReaderChromeHide();
+        if (!dom.ttsAudio.paused) {
+          dom.ttsAudio.pause();
+          ttsWantsPlay = false;
+          ttsIsPlaying = false;
+          ttsPlaybackStarting = false;
+          saveTtsPosition(true);
+          setTtsStatus(`已暂停第 ${ttsSegmentIndex + 1} 段`, 'paused');
+        }
         return;
       }
       if (navigator.onLine) syncToBackend().catch(() => {});
@@ -5044,12 +6159,15 @@
     }
 
     loadReaderChromeAutoHidePreference();
+    loadReaderTypographyPreference();
+    loadTtsVoices().catch(() => {});
     observeReaderIframes();
     bindEvents();
     syncReaderToolStates();
     registerSW();
     await renderLibrary();
     await updateSyncBadge();
+    await restoreViewFromHistory();
     refreshServerLibrary().catch(() => {});
     migrateLocalBooksToServer().catch(() => {});
 

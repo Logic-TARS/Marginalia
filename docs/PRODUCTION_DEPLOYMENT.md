@@ -7,7 +7,7 @@ Cloudflare Access 承担；Marginalia 本身仍是家庭共享账户，API 不�
 
 - 生产入口：`docker-compose.prod.yml`
 - 生产密钥：`.env.production`（已被 Git 忽略）
-- 持久数据：`backend/data` 绑定到容器 `/app/data`
+- 持久数据：`backend/data` 绑定到容器 `/app/data`，自动朗读缓存位于 `/app/data/tts`
 - 公网链路：Cloudflare Tunnel `read.zengziyang.com` → `http://api:8720`
 - EPUB 文件上限：90 MB
 - 备份目录：`G:\Backups\Marginalia`，默认保留 14 份
@@ -126,6 +126,8 @@ PowerShell 重试。备份脚本会在生产服务正在运行时短暂停止 AP
 - `Get-NetTCPConnection -State Listen -LocalPort 8720`：不得出现非 loopback 地址。
 - 家庭 Wi-Fi 与手机流量各测一次：白名单 OTP 成功，非白名单被拒，不需要 VPN。
 - 两台设备分别完成上传、阅读、划线、笔记、书签、进度同步和 AI 问答。
+- 打开一章测试自动朗读：首段生成后即播、后续段连续播放；刷新后恢复位置，同参数再次请求命中缓存。
+- 临时设置 `TTS_ENABLED=false` 重启，确认声音列表为空且页面不会卡死；恢复配置后执行 `docker compose -f docker-compose.prod.yml exec api python tts.py --cleanup` 验证清理命令。
 - 上传一个接近但不超过 90 MB 的有效 EPUB，再确认超过 90 MB 返回 HTTP 413。
 - 临时停止 `cloudflared`，确认外部呈现不可用而不是绕过 Access 直达源站；恢复后重连。
 - 删除一个测试邮箱并撤销会话，确认原会话立即失效。

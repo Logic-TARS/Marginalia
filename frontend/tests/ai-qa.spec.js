@@ -45,6 +45,7 @@ test.describe('AI book Q&A', () => {
     test.setTimeout(60_000);
     let conversations = [];
     let messages = [];
+    let submittedQuestion = '';
 
     await page.route('**/api/books', async route => {
       await route.fulfill({ json: { books: [] } });
@@ -104,6 +105,7 @@ test.describe('AI book Q&A', () => {
         return;
       }
       if (pathname.endsWith('/messages/stream') && method === 'POST') {
+        submittedQuestion = request.postDataJSON().content;
         const citation = {
           label: 'B1',
           source_type: 'book',
@@ -118,7 +120,7 @@ test.describe('AI book Q&A', () => {
           {
             id: 'user-1',
             role: 'user',
-            content: '第二章是什么？',
+            content: '第二章 是什么？',
             status: 'completed',
             citations: [],
           },
@@ -130,7 +132,7 @@ test.describe('AI book Q&A', () => {
             citations: [citation],
           },
         ];
-        conversations = [{ ...conversations[0], title: '第二章是什么？' }];
+        conversations = [{ ...conversations[0], title: '第二章 是什么？' }];
         const body = [
           'event: start\ndata: {"user_message_id":"user-1","assistant_message_id":"assistant-1"}\n\n',
           'event: delta\ndata: {"text":"第二章讨论了测试内容。"}\n\n',
@@ -160,13 +162,24 @@ test.describe('AI book Q&A', () => {
 
     await page.click('#btn-reader-tools');
     await page.click('#btn-toggle-ai');
-    await page.fill('#ai-question-input', '第二章是什么？');
-    await page.click('#btn-send-ai');
+    const questionInput = page.locator('#ai-question-input');
+    await questionInput.evaluate((element) => {
+      const clipboardData = new DataTransfer();
+      clipboardData.setData('text/plain', '第二章\r\n是什么？');
+      element.dispatchEvent(new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData,
+      }));
+    });
+    await expect(questionInput).toHaveValue('第二章 是什么？');
+    await questionInput.press('Enter');
 
     await expect(page.locator('.ai-message.assistant')).toContainText('第二章讨论了测试内容');
     const citationButton = page.locator('.ai-citation');
     await expect(citationButton).toContainText('Chapter 2');
-    await expect(page.locator('#ai-conversation-select')).toContainText('第二章是什么？');
+    await expect(page.locator('#ai-conversation-select')).toContainText('第二章 是什么？');
+    expect(submittedQuestion).toBe('第二章 是什么？');
 
     await citationButton.click();
     await expect(page.locator('#toolbar-chapter')).toContainText('Chapter 2', {

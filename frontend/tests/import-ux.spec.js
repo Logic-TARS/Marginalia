@@ -95,7 +95,7 @@ test.describe('EPUB import feedback', () => {
     await expect(page.locator('#operation-status')).toBeVisible();
     await expect(page.locator('#toolbar-book-title')).toContainText('Multichapter', { timeout: 10_000 });
     await expect(page.locator('#reader-loading')).toBeHidden();
-    expect(uploadStarted).toBe(true);
+    await expect.poll(() => uploadStarted).toBe(true);
 
     releaseUpload();
     await expect(page.locator('#operation-status-message')).toContainText(/已保存到服务器|已全部就绪/);
@@ -117,18 +117,44 @@ test.describe('EPUB import feedback', () => {
     await expect(page.locator('#reader-view')).toHaveClass(/active/);
   });
 
-  test('shows the loading overlay again after returning to the library', async ({ page }) => {
+  test('keeps the current read available when the offline copy exceeds browser quota', async ({ page }) => {
+    const serverBook = makeServerBook();
+    await page.addInitScript(() => {
+      const originalPut = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function patchedPut(value, ...args) {
+        if (this.name === 'books' && value?.file_blob && value?.cached_content_hash) {
+          throw new DOMException('Storage quota exceeded', 'QuotaExceededError');
+        }
+        return originalPut.call(this, value, ...args);
+      };
+    });
+    await installCommonRoutes(page, {
+      books: [serverBook],
+      fileHandler: route => route.fulfill({
+        status: 200,
+        contentType: 'application/epub+zip',
+        body: fixtureBytes,
+      }),
+    });
+
+    await page.goto('/index.html');
+    await expect(page.locator('.book-card')).toHaveCount(1);
+    await page.click('.book-card');
+
+    await expect(page.locator('#toolbar-book-title')).toContainText('Multichapter', { timeout: 10_000 });
+    await expect(page.locator('#toast')).toContainText('浏览器存储空间不足');
+    await expect(page.locator('#reader-view')).toHaveClass(/active/);
+  });
+
+  test('persists a server EPUB locally and refreshes it only when the content changes', async ({ page }) => {
     test.setTimeout(30_000);
     const serverBook = makeServerBook();
     let fileRequestCount = 0;
-    let releaseSecondDownload;
-    const secondDownloadGate = new Promise(resolve => { releaseSecondDownload = resolve; });
 
     await installCommonRoutes(page, {
       books: [serverBook],
       fileHandler: async route => {
         fileRequestCount += 1;
-        if (fileRequestCount === 2) await secondDownloadGate;
         await route.fulfill({
           status: 200,
           contentType: 'application/epub+zip',
@@ -140,16 +166,35 @@ test.describe('EPUB import feedback', () => {
 
     await page.goto('/index.html');
     await expect(page.locator('.book-card')).toHaveCount(1);
+    await expect(page.locator('.book-card-meta')).toContainText('需要联网打开');
     await page.click('.book-card');
     await expect(page.locator('#toolbar-book-title')).toContainText('Multichapter', { timeout: 10_000 });
+    expect(fileRequestCount).toBe(1);
 
     await page.click('#btn-back');
     await expect(page.locator('#library-view')).toHaveClass(/active/);
+    await expect(page.locator('.book-card-meta')).toContainText('已保存到本机');
     await page.click('.book-card');
-    await expect(page.locator('#reader-loading')).toBeVisible();
+    await expect(page.locator('#toolbar-book-title')).toContainText('Multichapter', { timeout: 10_000 });
+    expect(fileRequestCount).toBe(1);
 
-    releaseSecondDownload();
-    await expect(page.locator('#reader-loading')).toBeHidden({ timeout: 10_000 });
+    await page.reload();
+    await expect(page.locator('#toolbar-book-title')).toContainText('Multichapter', { timeout: 10_000 });
+    expect(fileRequestCount).toBe(1);
+
+    await page.click('#btn-back');
+    await page.context().setOffline(true);
+    await page.click('.book-card');
+    await expect(page.locator('#toolbar-book-title')).toContainText('Multichapter', { timeout: 10_000 });
+    expect(fileRequestCount).toBe(1);
+
+    await page.click('#btn-back');
+    await page.context().setOffline(false);
+    serverBook.content_hash = 'ux-fixture-hash-v2';
+    await page.reload();
+    await expect(page.locator('.book-card-meta')).toContainText('需要联网打开');
+    await page.click('.book-card');
+    await expect(page.locator('#toolbar-book-title')).toContainText('Multichapter', { timeout: 10_000 });
     expect(fileRequestCount).toBe(2);
   });
 });

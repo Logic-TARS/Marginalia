@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 import aiosqlite
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 # --- Setup: override DB_PATH before importing main ---
@@ -26,7 +27,12 @@ _test_books_dir = Path(_test_db_dir) / "books"
 books_api_module.BOOKS_DIR = _test_books_dir
 library_module.BOOKS_DIR = _test_books_dir
 # Defer main import until after DB_PATH patch
+import main as main_module
+import tts as tts_module
 from main import app
+
+_test_tts_dir = Path(_test_db_dir) / "tts"
+tts_module.tts_manager.storage_path = _test_tts_dir
 
 
 @pytest.fixture(autouse=True)
@@ -55,7 +61,12 @@ def reset_db():
                     path.unlink()
         if db_module.NOTES_JSON_PATH.exists():
             db_module.NOTES_JSON_PATH.unlink()
-    asyncio.get_event_loop().run_until_complete(_init())
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    loop.run_until_complete(_init())
     yield
     try:
         if _test_db_path.exists():
@@ -614,6 +625,146 @@ class TestServerLibraryAPI:
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/event-stream")
         assert "event: delta" in resp.text
+
+
+class TestTTSAPI:
+    def test_voice_list_contains_confirmed_chinese_voices(self, client):
+        response = client.get("/api/tts/voices")
+        assert response.status_code == 200
+        voices = response.json()["voices"]
+        assert {voice["id"] for voice in voices} == {
+            "zh-CN-XiaoxiaoNeural",
+            "zh-CN-YunxiNeural",
+        }
+        assert {voice["gender"] for voice in voices} == {"Female", "Male"}
+
+    def test_create_task_uses_book_and_chapter_ids_only(self, client):
+        async def accessible(_request, book_id):
+            return {"id": book_id, "filename": "safe.epub"}
+
+        async def fake_create(**kwargs):
+            assert kwargs["book"]["id"] == "book-1"
+            assert kwargs["chapter_id"] == "Text/chapter 1.xhtml"
+            assert kwargs["voice"] == "zh-CN-XiaoxiaoNeural"
+            assert kwargs["rate"] == 1.25
+            return {
+                "taskId": "task-1", "bookId": "book-1",
+                "chapterId": kwargs["chapter_id"], "status": "pending",
+                "segmentCount": 2, "completedSegments": 0, "segments": [],
+                "voice": kwargs["voice"], "rate": kwargs["rate"], "error": None,
+            }
+
+        with (
+            patch("main._tts_accessible_book", accessible),
+            patch.object(tts_module.tts_manager, "create_or_get", fake_create),
+        ):
+            response = client.post(
+                "/api/books/book-1/chapters/Text%2Fchapter%201.xhtml/tts",
+                json={"voice": "zh-CN-XiaoxiaoNeural", "rate": 1.25},
+            )
+        assert response.status_code == 202
+        assert response.json()["taskId"] == "task-1"
+
+    def test_duplicate_and_generating_requests_return_same_task(self, client):
+        task = {
+            "taskId": "same-task", "bookId": "book-1", "chapterId": "chapter.xhtml",
+            "status": "generating", "segmentCount": 3, "completedSegments": 1,
+            "segments": [{"index": 0, "audioUrl": "/audio"}],
+            "voice": "zh-CN-XiaoxiaoNeural", "rate": 1.0, "error": None,
+        }
+
+        async def accessible(_request, _book_id):
+            return {"id": "book-1", "filename": "book.epub"}
+
+        async def same_task(**_kwargs):
+            return task
+
+        with (
+            patch("main._tts_accessible_book", accessible),
+            patch.object(tts_module.tts_manager, "create_or_get", same_task),
+        ):
+            first = client.post(
+                "/api/books/book-1/chapters/chapter.xhtml/tts",
+                json={"voice": "zh-CN-XiaoxiaoNeural", "rate": 1.0},
+            )
+            second = client.post(
+                "/api/books/book-1/chapters/chapter.xhtml/tts",
+                json={"voice": "zh-CN-XiaoxiaoNeural", "rate": 1.0},
+            )
+        assert first.json()["taskId"] == second.json()["taskId"] == "same-task"
+
+    @pytest.mark.parametrize(
+        ("payload", "code"),
+        [
+            ({"voice": "arbitrary", "rate": 1.0}, "invalid_voice"),
+            ({"voice": "zh-CN-XiaoxiaoNeural", "rate": 1.1}, "invalid_rate"),
+        ],
+    )
+    def test_illegal_tts_parameters_are_rejected(self, client, payload, code):
+        async def accessible(_request, _book_id):
+            return {"id": "book-1", "filename": "book.epub"}
+
+        async def reject(**kwargs):
+            tts_module.TTSManager._validate_parameters(kwargs["voice"], kwargs["rate"])
+
+        with (
+            patch("main._tts_accessible_book", accessible),
+            patch.object(tts_module.tts_manager, "create_or_get", reject),
+        ):
+            response = client.post(
+                "/api/books/book-1/chapters/chapter.xhtml/tts", json=payload
+            )
+        assert response.status_code == 422
+        assert response.json()["detail"]["code"] == code
+
+    def test_missing_chapter_and_book_access_denial(self, client):
+        async def accessible(_request, _book_id):
+            return {"id": "book-1", "filename": "book.epub"}
+
+        async def missing(**_kwargs):
+            raise tts_module.TTSError("章节不存在", 404, "chapter_not_found")
+
+        with (
+            patch("main._tts_accessible_book", accessible),
+            patch.object(tts_module.tts_manager, "create_or_get", missing),
+        ):
+            missing_response = client.post(
+                "/api/books/book-1/chapters/missing.xhtml/tts",
+                json={"voice": "zh-CN-XiaoxiaoNeural", "rate": 1.0},
+            )
+        assert missing_response.status_code == 404
+
+        async def denied(_request, _book_id):
+            raise HTTPException(status_code=403, detail="无权访问该书籍")
+
+        with patch("main._tts_accessible_book", denied):
+            denied_response = client.post(
+                "/api/books/book-1/chapters/chapter.xhtml/tts",
+                json={"voice": "zh-CN-XiaoxiaoNeural", "rate": 1.0},
+            )
+        assert denied_response.status_code == 403
+
+    def test_failed_task_status_is_returned(self, client):
+        async def failed(_task_id):
+            return {
+                "taskId": "failed-task", "bookId": "book-1", "chapterId": "chapter.xhtml",
+                "status": "failed", "segmentCount": 2, "completedSegments": 1,
+                "segments": [{"index": 0, "audioUrl": "/audio"}],
+                "voice": "zh-CN-YunxiNeural", "rate": 1.0,
+                "error": "第 2 段生成超时",
+            }
+
+        async def accessible(_request, _book_id):
+            return {"id": "book-1"}
+
+        with (
+            patch.object(tts_module.tts_manager, "get_task", failed),
+            patch("main._tts_accessible_book", accessible),
+        ):
+            response = client.get("/api/tts/tasks/failed-task")
+        assert response.status_code == 200
+        assert response.json()["status"] == "failed"
+        assert "超时" in response.json()["error"]
 
 
 class TestCreationWorkspace:

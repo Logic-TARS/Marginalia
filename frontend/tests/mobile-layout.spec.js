@@ -15,6 +15,14 @@ async function expectNoHorizontalOverflow(page) {
   expect(metrics.bodyWidth).toBeLessThanOrEqual(metrics.viewport + 1);
 }
 
+function expectSameBounds(actual, expected, tolerance = 1) {
+  expect(actual).not.toBeNull();
+  expect(expected).not.toBeNull();
+  for (const key of ['x', 'y', 'width', 'height']) {
+    expect(Math.abs(actual[key] - expected[key])).toBeLessThanOrEqual(tolerance);
+  }
+}
+
 async function openFixture(page, url = '/index.html') {
   await page.goto(url);
   await page.setInputFiles('#file-input', FIXTURE);
@@ -273,17 +281,20 @@ test.describe('@mobile mobile layout', () => {
     await expect(page.locator('#library-view')).toHaveClass(/active/);
     await expectNoHorizontalOverflow(page);
 
-    const navigation = await page.locator('.app-nav').boundingBox();
-    const libraryTab = await page.locator('#btn-nav-library').boundingBox();
-    const viewportHeight = await page.evaluate(() => window.innerHeight);
-    expect(navigation).not.toBeNull();
-    expect(libraryTab).not.toBeNull();
-    expect(Math.abs((navigation.y + navigation.height) - viewportHeight)).toBeLessThanOrEqual(2);
-    expect(libraryTab.height).toBeGreaterThanOrEqual(44);
+    const homeHeader = await page.locator('.home-nav').boundingBox();
+    const creationEntry = await page.locator('#btn-library-create').boundingBox();
+    expect(homeHeader).not.toBeNull();
+    expect(creationEntry).not.toBeNull();
+    expect(homeHeader.y).toBeLessThanOrEqual(1);
+    expect(creationEntry.height).toBeGreaterThanOrEqual(44);
+    await expect(page.locator('.nav-tabs')).toHaveCount(0);
 
-    await page.locator('#btn-nav-create').click();
+    await page.locator('#btn-library-create').click();
     await expect(page.locator('#creation-view')).toHaveClass(/active/);
-    await expect(page.locator('#btn-nav-create')).toHaveClass(/active/);
+    await expect(page.locator('#library-view')).not.toHaveClass(/active/);
+    await expect(page.locator('#btn-creation-back')).toBeVisible();
+    await expect(page.locator('.home-nav')).toBeHidden();
+    await expect(page).toHaveURL(/#\/creation$/);
     await expectNoHorizontalOverflow(page);
 
     const flowMetrics = await page.evaluate(() => {
@@ -314,19 +325,22 @@ test.describe('@mobile mobile layout', () => {
 
     const readerMetrics = await page.evaluate(() => {
       const host = document.querySelector('#epub-container').getBoundingClientRect();
+      const toolbar = document.querySelector('.reader-toolbar').getBoundingClientRect();
       const footer = document.querySelector('.reader-footer').getBoundingClientRect();
-      const nav = document.querySelector('.app-nav').getBoundingClientRect();
       return {
         hostHeight: host.height,
+        hostTop: host.top,
         hostBottom: host.bottom,
+        toolbarBottom: toolbar.bottom,
         footerTop: footer.top,
         footerBottom: footer.bottom,
-        navTop: nav.top,
+        viewportHeight: window.innerHeight,
       };
     });
     expect(readerMetrics.hostHeight).toBeGreaterThan(400);
-    expect(readerMetrics.hostBottom).toBeLessThanOrEqual(readerMetrics.footerTop + 1);
-    expect(readerMetrics.footerBottom).toBeLessThanOrEqual(readerMetrics.navTop + 1);
+    expect(readerMetrics.hostTop).toBeLessThan(readerMetrics.toolbarBottom);
+    expect(readerMetrics.hostBottom).toBeGreaterThan(readerMetrics.footerTop);
+    expect(readerMetrics.footerBottom).toBeLessThanOrEqual(readerMetrics.viewportHeight + 1);
 
     await page.locator('#btn-reader-tools').click();
     await expect(page.locator('#reader-tool-panel')).toBeVisible();
@@ -464,33 +478,52 @@ test.describe('@mobile mobile layout', () => {
     expect(await page.locator('#toolbar-chapter').textContent()).toBe(initialChapter);
   });
 
-  test('auto-hides reader chrome and restores it with a double tap', async ({ page }) => {
+  test('floats reader chrome without resizing or repaginating the book', async ({ page }) => {
     await openFixture(page);
     const reader = page.locator('#reader-view');
-    const initialHost = await page.locator('#epub-container').boundingBox();
+    const revealButton = page.locator('#btn-reveal-reader-chrome');
     await expect(reader).toHaveClass(/reader-chrome-hidden/, { timeout: 6_000 });
-    await expect(page.locator('.reader-toolbar')).toBeHidden();
-    await expect(page.locator('.reader-footer')).toBeHidden();
-    await expect(page.locator('.app-nav')).toBeHidden();
-    await page.waitForTimeout(350);
-
-    const immersiveHost = await page.locator('#epub-container').boundingBox();
-    expect(immersiveHost.height).toBeGreaterThan(initialHost.height + 80);
-
-    await doubleTapIframeWithTouchscreen(page);
+    await revealButton.click();
     await expect(reader).not.toHaveClass(/reader-chrome-hidden/, { timeout: 1_500 });
     await expect(page.locator('.reader-toolbar')).toBeVisible();
     await expect(page.locator('.reader-footer')).toBeVisible();
-    await expect(page.locator('.app-nav')).toBeVisible();
-    await page.waitForTimeout(850);
+    await expect(page.locator('.home-nav')).toBeHidden();
+    await page.waitForTimeout(350);
+
+    const visibleHost = await page.locator('#epub-container').boundingBox();
+    const stablePage = currentPageFromText(await page.locator('#page-text').textContent());
+    const overlayMetrics = await page.evaluate(() => {
+      const host = document.querySelector('#epub-container').getBoundingClientRect();
+      const toolbar = document.querySelector('.reader-toolbar').getBoundingClientRect();
+      const footer = document.querySelector('.reader-footer').getBoundingClientRect();
+      return { hostTop: host.top, hostBottom: host.bottom, toolbarBottom: toolbar.bottom, footerTop: footer.top };
+    });
+    expect(overlayMetrics.hostTop).toBeLessThan(overlayMetrics.toolbarBottom);
+    expect(overlayMetrics.hostBottom).toBeGreaterThan(overlayMetrics.footerTop);
 
     await doubleTapIframeWithTouchscreen(page);
     await expect(reader).toHaveClass(/reader-chrome-hidden/);
+    await expect(page.locator('.reader-toolbar')).toBeHidden();
+    await expect(page.locator('.reader-footer')).toBeHidden();
+    await expect(page.locator('.home-nav')).toBeHidden();
+    await page.waitForTimeout(350);
 
-    const revealButton = page.locator('#btn-reveal-reader-chrome');
+    const hiddenHost = await page.locator('#epub-container').boundingBox();
+    expectSameBounds(hiddenHost, visibleHost);
+    expect(currentPageFromText(await page.locator('#page-text').textContent())).toBe(stablePage);
+
+    await page.waitForTimeout(500);
+    await doubleTapIframeWithTouchscreen(page);
+    await expect(reader).not.toHaveClass(/reader-chrome-hidden/, { timeout: 1_500 });
+    await page.waitForTimeout(350);
+    expectSameBounds(await page.locator('#epub-container').boundingBox(), visibleHost);
+    expect(currentPageFromText(await page.locator('#page-text').textContent())).toBe(stablePage);
+
+    await page.waitForTimeout(500);
+    await doubleTapIframeWithTouchscreen(page);
+    await expect(reader).toHaveClass(/reader-chrome-hidden/);
     await expect(revealButton).toBeVisible();
-    const revealBounds = await revealButton.boundingBox();
-    expect(revealBounds).not.toBeNull();
+    expect(await revealButton.boundingBox()).not.toBeNull();
     await expect(page.locator('#btn-nav-prev')).toBeHidden();
     await expect(page.locator('#btn-nav-next')).toBeHidden();
     await revealButton.click();

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -47,6 +47,7 @@ from models import (
     SyncResponse,
     ScriptRequest,
     ScriptResponse,
+    TTSCreateRequest,
 )
 from books_api import serve_book
 from database import export_all_to_json
@@ -67,10 +68,15 @@ async def lifespan(app: FastAPI):
     await init_library_db()
     await reconcile_legacy_books()
     await start_index_worker()
+    from tts import tts_manager
+
+    if settings.tts_enabled:
+        await tts_manager.start()
     logger.info("Database initialized; Python executable: %s", sys.executable)
     try:
         yield
     finally:
+        await tts_manager.stop()
         await stop_index_worker()
 
 
@@ -544,6 +550,104 @@ async def sync_server_book(book_id: str, request: BookSyncRequest):
     return await sync_book_state(
         book_id, [operation.model_dump() for operation in request.operations]
     )
+
+
+# ── Chapter narration ──────────────────────────────────
+async def _tts_accessible_book(request: Request, book_id: str) -> dict:
+    """Apply the existing single-user book access boundary.
+
+    Deployments that add authentication can set request.state.allowed_book_ids;
+    TTS will then enforce that scope without accepting chapter text from clients.
+    """
+    from library import get_library_book
+
+    book = await get_library_book(book_id, include_knowledge=False)
+    if not book:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "book_not_found", "message": "书籍不存在"},
+        )
+    allowed_book_ids = getattr(request.state, "allowed_book_ids", None)
+    if allowed_book_ids is not None and book_id not in set(allowed_book_ids):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "book_forbidden", "message": "无权访问该书籍"},
+        )
+    return book
+
+
+def _raise_tts_http(error: Exception) -> None:
+    from tts import TTSError
+
+    if isinstance(error, TTSError):
+        raise HTTPException(
+            status_code=error.status_code,
+            detail={"code": error.code, "message": str(error)},
+        ) from error
+    raise error
+
+
+@app.get("/api/tts/voices")
+async def get_tts_voices():
+    from tts import CHINESE_VOICES
+
+    return {
+        "enabled": settings.tts_enabled,
+        "provider": settings.tts_provider,
+        "defaultVoice": settings.tts_default_voice,
+        "voices": list(CHINESE_VOICES) if settings.tts_enabled else [],
+    }
+
+
+@app.post("/api/books/{book_id}/chapters/{chapter_id:path}/tts", status_code=202)
+async def create_chapter_tts(
+    book_id: str,
+    chapter_id: str,
+    options: TTSCreateRequest,
+    request: Request,
+):
+    from tts import tts_manager
+
+    book = await _tts_accessible_book(request, book_id)
+    try:
+        return await tts_manager.create_or_get(
+            book=book,
+            chapter_id=chapter_id,
+            voice=options.voice,
+            rate=options.rate,
+            client_id=request.client.host if request.client else "local",
+        )
+    except Exception as error:
+        _raise_tts_http(error)
+
+
+@app.get("/api/tts/tasks/{task_id}")
+async def get_tts_task(task_id: str, request: Request):
+    from tts import tts_manager
+
+    try:
+        task = await tts_manager.get_task(task_id)
+        await _tts_accessible_book(request, task["bookId"])
+        return task
+    except Exception as error:
+        _raise_tts_http(error)
+
+
+@app.get("/api/tts/tasks/{task_id}/segments/{segment_index}")
+async def get_tts_audio(task_id: str, segment_index: int, request: Request):
+    from tts import tts_manager
+
+    try:
+        task = await tts_manager.get_task(task_id)
+        await _tts_accessible_book(request, task["bookId"])
+        path, metadata = await tts_manager.get_audio(task_id, segment_index)
+        return FileResponse(
+            str(path),
+            media_type="audio/mpeg",
+            headers={"Accept-Ranges": "bytes"},
+        )
+    except Exception as error:
+        _raise_tts_http(error)
 
 
 @app.delete("/api/books/{book_id}")

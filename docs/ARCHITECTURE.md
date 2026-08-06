@@ -29,7 +29,7 @@ Marginalia is an end-to-end local reading workflow: EPUB highlights -> backend n
 
 - **Stack**: Vanilla HTML/JS/CSS + epub.js
 - **Storage**: IndexedDB (`books`, `highlights`, `bookmarks`, `sync_queue`) as an offline cache
-- **Key features**: server-first EPUB import, CFI-based highlighting, inline notes, tags, search, bookmarks, AI Q&A, cross-device sync
+- **Key features**: server-first EPUB import, CFI-based highlighting, inline notes, tags, search, bookmarks, AI Q&A, cross-device sync, and HTML5 Audio chapter narration
 - **Offline**: Service worker caches the app shell and server EPUB responses; mutations queue locally until the server is reachable
 
 ### 2. Backend API (`backend/`)
@@ -51,6 +51,9 @@ Marginalia is an end-to-end local reading workflow: EPUB highlights -> backend n
   - `GET /api/books` and `GET /api/books/{id}/file` — list and read canonical server EPUBs
   - `GET/POST /api/books/{id}/sync` — pull state or apply idempotent progress/bookmark/highlight operations
   - `DELETE /api/books/{id}` — delete the EPUB, reader state, and AI data on every device
+  - `GET /api/tts/voices` — list the small verified Chinese voice whitelist
+  - `POST /api/books/{id}/chapters/{href}/tts` — create, merge, or reuse a chapter narration task
+  - `GET /api/tts/tasks/{id}` and `/segments/{index}` — poll generation and stream controlled MP3 segments
   - `GET /health` — health check
 - **Database**: SQLite (embedded, zero-config)
 
@@ -62,7 +65,15 @@ Marginalia is an end-to-end local reading workflow: EPUB highlights -> backend n
   embedding similarity with lexical retrieval, streams grounded answers, stores
   per-book conversations, and returns navigable source citations.
 
-### 4. Obsidian Export (`backend/obsidian.py`)
+### 4. Chapter TTS (`backend/tts.py`)
+
+- Reads chapter documents only from canonical EPUB files in `backend/data/books`; clients submit IDs and options, never arbitrary text.
+- BeautifulSoup removes scripts, styles, navigation, invisible controls, and Markdown markers before content hashing.
+- A deterministic key covers book ID, chapter href, cleaned content hash, voice, rate, and provider. Files are stored beneath `backend/data/tts/` with atomic `metadata.json` updates and `segment-NNN.mp3` files.
+- An in-process task manager merges duplicates, limits global/client concurrency, retries only the failed segment, marks interrupted tasks failed on restart, and exposes a manual retention cleanup command.
+- The existing deployment is a shared single-user app. Cloudflare Access protects production; if later authentication middleware sets `request.state.allowed_book_ids`, TTS enforces that per-book scope too.
+
+### 5. Obsidian Export (`backend/obsidian.py`)
 
 - Exports book materials and generated drafts as Markdown files.
 - Requires `OBSIDIAN_VAULT_PATH` to point at the target vault.
@@ -79,6 +90,8 @@ Marginalia is an end-to-end local reading workflow: EPUB highlights -> backend n
 8. EPUB imports are hashed and queued for background indexing without blocking reading.
 9. Questions retrieve relevant book chunks and notes, then stream a source-grounded answer.
 10. Conversations and citation snapshots remain available after reopening the book.
+11. Narration requests resolve the current epub.js href to a server-side spine document; the first generated segment becomes playable while remaining segments continue in the background.
+12. The browser stores only playback position/options in localStorage; reusable MP3 cache and status metadata remain on the server.
 
 ## Key Design Decisions
 
@@ -93,3 +106,6 @@ Marginalia is an end-to-end local reading workflow: EPUB highlights -> backend n
 | No auth | MVP scope; add API key before exposed deployment |
 | SQLite vectors over a vector service | Keeps a single-user deployment zero-infrastructure |
 | Persistent index queue | Interrupted EPUB indexing can resume after a backend restart |
+| Direct Python edge-tts integration | The backend is already FastAPI/Python, so no second service or API key is needed |
+| File-backed TTS metadata + in-process workers | Keeps the single-process MVP zero-infrastructure; interrupted generation is explicitly failed and retryable |
+| Controlled audio endpoint | Task/segment validation prevents arbitrary file reads and directory traversal |

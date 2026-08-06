@@ -64,6 +64,14 @@ async function getPageInfo(page) {
   return parsePageText(text);
 }
 
+function expectSameBounds(actual, expected, tolerance = 1) {
+  expect(actual).not.toBeNull();
+  expect(expected).not.toBeNull();
+  for (const key of ['x', 'y', 'width', 'height']) {
+    expect(Math.abs(actual[key] - expected[key])).toBeLessThanOrEqual(tolerance);
+  }
+}
+
 /**
  * Helper: wait for chapter label to stabilize (not "加载中…").
  */
@@ -117,21 +125,40 @@ test.describe('@smoke', () => {
     expect(containerMetrics.innerClientWidth).toBe(containerMetrics.hostClientWidth);
   });
 
-  test('desktop reader chrome auto-hides and returns on double click', async ({ page }) => {
+  test('desktop reader chrome floats without resizing or repaginating the book', async ({ page }) => {
     await openFixture(page);
     const reader = page.locator('#reader-view');
+    const revealButton = page.locator('#btn-reveal-reader-chrome');
     await expect(reader).toHaveClass(/reader-chrome-hidden/, { timeout: 6_000 });
-    await expect(page.locator('.app-nav')).toBeHidden();
+    await revealButton.click();
+    await expect(reader).not.toHaveClass(/reader-chrome-hidden/);
+    await expect(page.locator('.home-nav')).toBeHidden();
+    await expect(page.locator('.reader-toolbar')).toBeVisible();
+    await expect(page.locator('.reader-footer')).toBeVisible();
+    await page.waitForTimeout(350);
+
+    const visibleHost = await page.locator('#epub-container').boundingBox();
+    const stablePage = await getPageInfo(page);
+    const stableChapter = await getChapterLabel(page);
+
+    await doubleClickIframe(page);
+    await expect(reader).toHaveClass(/reader-chrome-hidden/);
+    await expect(page.locator('.home-nav')).toBeHidden();
     await expect(page.locator('.reader-toolbar')).toBeHidden();
     await expect(page.locator('.reader-footer')).toBeHidden();
     await page.waitForTimeout(350);
 
-    await doubleClickIframe(page);
+    expectSameBounds(await page.locator('#epub-container').boundingBox(), visibleHost);
+    expect(await getPageInfo(page)).toEqual(stablePage);
+    expect(await getChapterLabel(page)).toBe(stableChapter);
 
+    await page.waitForTimeout(500);
+    await doubleClickIframe(page);
     await expect(reader).not.toHaveClass(/reader-chrome-hidden/);
-    await expect(page.locator('.app-nav')).toBeVisible();
-    await expect(page.locator('.reader-toolbar')).toBeVisible();
-    await expect(page.locator('.reader-footer')).toBeVisible();
+    await page.waitForTimeout(350);
+    expectSameBounds(await page.locator('#epub-container').boundingBox(), visibleHost);
+    expect(await getPageInfo(page)).toEqual(stablePage);
+    expect(await getChapterLabel(page)).toBe(stableChapter);
   });
 
   test('narrow desktop viewport keeps exact one-page button navigation', async ({ page }) => {

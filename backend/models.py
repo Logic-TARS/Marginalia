@@ -58,6 +58,13 @@ class BookSyncRequest(BaseModel):
     operations: list[ReaderSyncOperation] = Field(default_factory=list)
 
 
+class TTSCreateRequest(BaseModel):
+    """Whitelisted chapter narration options; chapter text stays server-side."""
+
+    voice: str = "zh-CN-XiaoxiaoNeural"
+    rate: float = 1.0
+
+
 class HighlightUpdate(BaseModel):
     """Editable highlight fields."""
     book_title: Optional[str] = None

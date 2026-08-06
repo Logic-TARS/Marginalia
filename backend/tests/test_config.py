@@ -23,6 +23,18 @@ def _load_settings(monkeypatch, values: dict[str, str]):
         "CORS_ORIGINS",
         "ALLOWED_HOSTS",
         "MAX_EPUB_UPLOAD_MB",
+        "TTS_ENABLED",
+        "TTS_PROVIDER",
+        "TTS_STORAGE_PATH",
+        "TTS_DEFAULT_VOICE",
+        "TTS_MAX_CONCURRENCY",
+        "TTS_MAX_RETRIES",
+        "TTS_SEGMENT_MAX_CHARS",
+        "TTS_REQUEST_TIMEOUT",
+        "TTS_CACHE_RETENTION_DAYS",
+        "TTS_MAX_TASKS_PER_CLIENT",
+        "TTS_CREATE_RATE_LIMIT_PER_MINUTE",
+        "TTS_MIN_AUDIO_BYTES",
     }
     for name in names:
         monkeypatch.delenv(name, raising=False)
@@ -110,3 +122,27 @@ def test_security_defaults_are_local_only(monkeypatch):
 
     assert settings.allowed_host_list == ["localhost", "127.0.0.1", "testserver"]
     assert settings.max_epub_upload_mb == 90
+
+
+def test_tts_defaults_and_environment_overrides(monkeypatch):
+    defaults = _load_settings(monkeypatch, {})
+    assert defaults.tts_enabled is True
+    assert defaults.tts_provider == "edge-tts"
+    assert defaults.tts_default_voice == "zh-CN-XiaoxiaoNeural"
+    assert defaults.tts_max_concurrency == 3
+    assert defaults.tts_segment_max_chars == 1000
+
+    configured = _load_settings(monkeypatch, {
+        "TTS_ENABLED": "false",
+        "TTS_MAX_CONCURRENCY": "4",
+        "TTS_MAX_RETRIES": "2",
+        "TTS_SEGMENT_MAX_CHARS": "800",
+        "TTS_REQUEST_TIMEOUT": "45",
+        "TTS_CACHE_RETENTION_DAYS": "7",
+    })
+    assert configured.tts_enabled is False
+    assert configured.tts_max_concurrency == 4
+    assert configured.tts_max_retries == 2
+    assert configured.tts_segment_max_chars == 800
+    assert configured.tts_request_timeout == 45
+    assert configured.tts_cache_retention_days == 7

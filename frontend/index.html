@@ -7,33 +7,12 @@
   <meta name="description" content="Marginalia - 阅读划线、读书感悟、内容创作与 Obsidian 导出">
   <link rel="manifest" href="manifest.json">
   <title>Marginalia</title>
-  <link rel="stylesheet" href="style.css?v=24">
+  <link rel="stylesheet" href="style.css?v=29">
   <script src="jszip.min.js"></script>
   <script src="epub.min.js"></script>
 </head>
 <body>
   <div id="app" class="app-container">
-    <nav class="app-nav" aria-label="主导航">
-      <div class="brand">
-        <span class="brand-mark">M</span>
-        <div class="brand-copy">
-          <strong>Marginalia</strong>
-          <span>从阅读到成稿</span>
-        </div>
-      </div>
-      <div class="nav-tabs">
-        <button class="nav-tab active" id="btn-nav-library" type="button">
-          <span class="nav-tab-icon" aria-hidden="true">▤</span><span>书库</span>
-        </button>
-        <button class="nav-tab" id="btn-nav-read" type="button">
-          <span class="nav-tab-icon" aria-hidden="true">◇</span><span>阅读</span>
-        </button>
-        <button class="nav-tab" id="btn-nav-create" type="button">
-          <span class="nav-tab-icon" aria-hidden="true">✎</span><span>创作</span>
-        </button>
-      </div>
-    </nav>
-
     <section class="operation-status" id="operation-status" aria-live="polite" hidden>
       <div class="operation-status-copy">
         <strong id="operation-status-message">正在处理书籍…</strong>
@@ -48,11 +27,26 @@
     </section>
 
     <div id="library-view" class="view active">
+      <header class="home-nav">
+        <div class="brand">
+          <span class="brand-mark">M</span>
+          <div class="brand-copy">
+            <strong>Marginalia</strong>
+            <span>从阅读到成稿</span>
+          </div>
+        </div>
+        <span class="home-nav-label">主界面</span>
+      </header>
       <header class="library-header">
         <div class="page-heading">
           <span class="eyebrow">Library</span>
           <h1 class="app-title">你的阅读素材库</h1>
           <p class="app-subtitle">导入 EPUB，阅读时划线，沉淀感悟，再把素材送进创作工作台。</p>
+          <div class="library-flow" aria-label="阅读工作流">
+            <span><b>01</b> 安静阅读</span>
+            <span><b>02</b> 留下边注</span>
+            <span><b>03</b> 转化成稿</span>
+          </div>
         </div>
         <div class="library-actions">
           <label class="btn btn-primary import-btn">
@@ -65,16 +59,17 @@
 
       <main class="book-list" id="book-list">
         <div class="empty-state" id="empty-library">
-          <div class="empty-icon">M</div>
-          <p>还没有书</p>
-          <p class="empty-hint">导入一本 EPUB，或把 EPUB 放到 backend/data/books 后刷新页面。</p>
+          <div class="empty-icon" aria-hidden="true">M</div>
+          <p class="empty-state-title">从一本书开始</p>
+          <p class="empty-hint">导入 EPUB，把阅读、边注与创作留在同一间数字书斋。</p>
+          <label class="btn btn-primary empty-import-btn" for="file-input">导入第一本书</label>
         </div>
       </main>
     </div>
 
     <div id="reader-view" class="view">
       <div class="reader-toolbar">
-        <button class="btn btn-ghost" id="btn-back" title="返回书库" type="button">返回书库</button>
+        <button class="btn btn-ghost" id="btn-back" title="返回主界面" type="button">返回主界面</button>
         <div class="toolbar-info">
           <span class="book-title-label" id="toolbar-book-title">未打开书籍</span>
           <span class="chapter-label" id="toolbar-chapter">选择一本书开始阅读</span>
@@ -94,10 +89,83 @@
                   aria-expanded="false" aria-controls="notes-panel">划线面板</button>
           <button class="btn btn-ghost" id="btn-toggle-search" title="搜索本书" type="button"
                   aria-expanded="false" aria-controls="search-panel">搜索</button>
+          <button class="btn btn-ghost" id="btn-toggle-tts" title="自动朗读当前章节" type="button"
+                  aria-expanded="false" aria-controls="tts-panel">自动朗读</button>
           <button class="btn btn-ghost" id="btn-toggle-reader-auto-hide" title="切换阅读控制栏自动收起" type="button"
                   aria-pressed="true">自动收起：开</button>
         </div>
+        <section class="reader-typography" aria-labelledby="reader-typography-title">
+          <div class="reader-typography-heading">
+            <strong id="reader-typography-title">阅读排版</strong>
+            <span>仅调整正文显示，不改变书籍内容</span>
+          </div>
+          <label class="reader-font-family-field" for="reader-font-family">
+            <span>阅读字体</span>
+            <select id="reader-font-family">
+              <option value="original">原书排版</option>
+              <option value="serif">宋体</option>
+              <option value="sans">黑体</option>
+              <option value="kai">楷体</option>
+            </select>
+          </label>
+          <div class="reader-font-size-field" role="group" aria-labelledby="reader-font-size-label">
+            <div class="reader-font-size-copy">
+              <span id="reader-font-size-label">正文字号</span>
+              <output id="reader-font-size-value" for="reader-font-size">100%</output>
+            </div>
+            <div class="reader-font-size-controls">
+              <button class="btn btn-ghost reader-font-step" id="btn-reader-font-decrease" type="button" aria-label="减小正文字号">A−</button>
+              <input id="reader-font-size" type="range" min="60" max="200" step="5" value="100" aria-label="正文字号百分比">
+              <button class="btn btn-ghost btn-sm" id="btn-reader-font-reset" type="button">恢复默认</button>
+              <button class="btn btn-ghost reader-font-step" id="btn-reader-font-increase" type="button" aria-label="增大正文字号">A＋</button>
+            </div>
+          </div>
+        </section>
       </div>
+
+      <section class="tts-panel" id="tts-panel" aria-label="自动朗读" hidden>
+        <div class="tts-panel-header">
+          <div class="tts-heading-copy">
+            <span class="eyebrow">Narration</span>
+            <strong>自动朗读</strong>
+            <span id="tts-status" role="status" aria-live="polite">选择声音后朗读当前章节</span>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="btn-close-tts" type="button">收起</button>
+        </div>
+        <div class="tts-options">
+          <label class="tts-option-field"><span>朗读声音</span>
+            <select id="tts-voice" aria-label="朗读声音">
+              <option value="zh-CN-XiaoxiaoNeural">晓晓（女声）</option>
+              <option value="zh-CN-YunxiNeural">云希（男声）</option>
+            </select>
+          </label>
+          <label class="tts-option-field"><span>播放语速</span>
+            <select id="tts-rate" aria-label="朗读语速">
+              <option value="0.75">0.75×</option>
+              <option value="1">1.0×</option>
+              <option value="1.25">1.25×</option>
+              <option value="1.5">1.5×</option>
+              <option value="2">2.0×</option>
+            </select>
+          </label>
+          <label class="tts-continuous"><input id="tts-continuous" type="checkbox" checked><span>连续播放</span></label>
+          <button class="btn btn-primary tts-start" id="btn-tts-start" type="button">朗读当前章节</button>
+        </div>
+        <div class="tts-controls">
+          <div class="tts-transport" aria-label="朗读控制">
+            <button class="btn btn-ghost btn-sm" id="btn-tts-prev" type="button" disabled>上一段</button>
+            <button class="btn btn-primary btn-sm" id="btn-tts-play" type="button" disabled>播放</button>
+            <button class="btn btn-secondary btn-sm" id="btn-tts-pause" type="button" disabled>暂停</button>
+            <button class="btn btn-ghost btn-sm" id="btn-tts-next" type="button" disabled>下一段</button>
+          </div>
+          <span id="tts-segment-label">第 0 / 0 段</span>
+        </div>
+        <div class="tts-progress-row">
+          <input id="tts-progress" type="range" min="0" max="1000" value="0" aria-label="当前音频进度" disabled>
+          <span id="tts-time">00:00 / 00:00</span>
+        </div>
+        <audio id="tts-audio" preload="metadata"></audio>
+      </section>
 
       <div class="reader-main ai-collapsed notes-collapsed">
         <aside class="ai-panel collapsed" id="ai-panel">
@@ -125,7 +193,7 @@
             <div class="ai-empty">问一个和这本书有关的问题。</div>
           </div>
           <form class="ai-input-row" id="ai-form">
-            <textarea id="ai-question-input" rows="3" placeholder="例如：这一章在讲什么？"></textarea>
+            <textarea id="ai-question-input" rows="3" placeholder="输入问题；Enter 发送，Shift+Enter 换行（粘贴换行会自动合并）"></textarea>
             <button class="btn btn-primary" id="btn-send-ai" type="submit">发送</button>
           </form>
         </aside>
@@ -213,10 +281,13 @@
 
     <div id="creation-view" class="view">
       <header class="creation-header">
-        <div class="page-heading">
-          <span class="eyebrow">Studio</span>
-          <h1>创作工作台</h1>
-          <p>挑选划线素材，补充个人感悟，再生成可继续修改的内容草稿。</p>
+        <div class="creation-heading-group">
+          <button class="btn btn-ghost page-back" id="btn-creation-back" title="返回主界面" type="button">返回主界面</button>
+          <div class="page-heading">
+            <span class="eyebrow">Studio</span>
+            <h1>创作工作台</h1>
+            <p>挑选划线素材，补充个人感悟，再生成可继续修改的内容草稿。</p>
+          </div>
         </div>
         <div class="creation-actions">
           <button class="btn btn-primary" id="btn-refresh-materials" type="button">刷新素材</button>
@@ -225,14 +296,14 @@
       </header>
 
       <div class="creation-steps" aria-label="创作步骤">
-        <span class="creation-step is-active">摘录</span>
-        <span class="creation-step">判断</span>
-        <span class="creation-step">成稿</span>
-        <span class="creation-step">入库</span>
+        <span class="creation-step is-active"><b>01</b><span>摘录</span></span>
+        <span class="creation-step"><b>02</b><span>判断</span></span>
+        <span class="creation-step"><b>03</b><span>成稿</span></span>
+        <span class="creation-step"><b>04</b><span>入库</span></span>
       </div>
 
       <div class="creation-layout">
-        <aside class="materials-pane workspace-pane">
+        <aside class="materials-pane workspace-pane" data-stage="01">
           <div class="pane-heading">
             <div>
               <span class="eyebrow">Materials</span>
@@ -247,7 +318,7 @@
           <div class="materials-list" id="materials-list"></div>
         </aside>
 
-        <section class="reflection-pane workspace-pane paper-pane">
+        <section class="reflection-pane workspace-pane paper-pane" data-stage="02">
           <div class="pane-heading">
             <div>
               <span class="eyebrow">Reflection</span>
@@ -266,7 +337,7 @@
           </div>
         </section>
 
-        <section class="draft-pane workspace-pane editor-pane">
+        <section class="draft-pane workspace-pane editor-pane" data-stage="03">
           <div class="pane-heading">
             <div>
               <span class="eyebrow">Drafts</span>
@@ -342,6 +413,6 @@
     <div id="toast" class="toast" hidden></div>
   </div>
 
-  <script src="app.js?v=24"></script>
+  <script src="app.js?v=31"></script>
 </body>
 </html>
