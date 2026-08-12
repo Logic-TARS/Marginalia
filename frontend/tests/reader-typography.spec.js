@@ -60,7 +60,7 @@ test.describe('reader typography settings', () => {
 
   test('applies fonts and sizes, preserves the reading anchor, and restores preferences', async ({ page }) => {
     await openFixture(page);
-    await page.locator('#btn-nav-next').click();
+    await page.keyboard.press('ArrowRight');
     await page.waitForTimeout(350);
     const chapterBefore = await page.locator('#toolbar-chapter').textContent();
     const visibleBefore = await getVisibleParagraphs(page);

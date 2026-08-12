@@ -7,7 +7,7 @@
   <meta name="description" content="Marginalia - 阅读划线、读书感悟、内容创作与 Obsidian 导出">
   <link rel="manifest" href="manifest.json">
   <title>Marginalia</title>
-  <link rel="stylesheet" href="style.css?v=29">
+  <link rel="stylesheet" href="style.css?v=31">
   <script src="jszip.min.js"></script>
   <script src="epub.min.js"></script>
 </head>
@@ -82,6 +82,8 @@
 
       <div class="reader-tool-panel" id="reader-tool-panel" hidden>
         <div class="reader-tool-actions" aria-label="阅读工具">
+          <button class="btn btn-ghost" id="btn-toggle-navigator" title="切换目录与书签" type="button"
+                  aria-expanded="false" aria-controls="reader-navigator">目录与书签</button>
           <button class="btn btn-ghost" id="btn-toggle-ai" title="切换 AI 问答面板" type="button"
                   aria-expanded="false" aria-controls="ai-panel">AI 问答</button>
           <button class="btn btn-ghost" id="btn-add-bookmark" title="添加当前位置为书签" type="button">书签</button>
@@ -93,6 +95,10 @@
                   aria-expanded="false" aria-controls="tts-panel">自动朗读</button>
           <button class="btn btn-ghost" id="btn-toggle-reader-auto-hide" title="切换阅读控制栏自动收起" type="button"
                   aria-pressed="true">自动收起：开</button>
+          <button class="btn btn-ghost btn-sync" id="btn-sync" disabled type="button">
+            <span class="sync-label">同步</span>
+            <span class="sync-badge" id="sync-badge" hidden>0</span>
+          </button>
         </div>
         <section class="reader-typography" aria-labelledby="reader-typography-title">
           <div class="reader-typography-heading">
@@ -167,6 +173,40 @@
         <audio id="tts-audio" preload="metadata"></audio>
       </section>
 
+      <aside class="reader-navigator collapsed" id="reader-navigator" aria-label="目录与书签" aria-hidden="true">
+        <div class="reader-navigator-header">
+          <div>
+            <span class="eyebrow">Navigation</span>
+            <h3>目录与书签</h3>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="btn-close-navigator" type="button" aria-label="收起目录与书签">收起</button>
+        </div>
+        <div class="reader-navigator-content">
+          <section class="toc-section" aria-labelledby="toc-heading">
+            <div class="navigator-section-heading" id="toc-heading">章节目录</div>
+            <nav class="toc-list" id="toc-list" aria-label="章节目录">
+              <div class="empty-toc">正在读取目录…</div>
+            </nav>
+          </section>
+          <section class="bookmarks-section" aria-labelledby="bookmarks-heading">
+            <div class="navigator-section-heading" id="bookmarks-heading">
+              <span>书签</span>
+              <span class="bookmarks-count" id="bookmarks-count">0</span>
+            </div>
+            <div class="bookmarks-list" id="bookmarks-list">
+              <div class="empty-bookmarks">还没有书签</div>
+            </div>
+          </section>
+        </div>
+        <div class="reader-location" aria-label="当前位置">
+          <span class="progress-text" id="progress-text">0%</span>
+          <span class="page-text" id="page-text">页码计算中...</span>
+        </div>
+      </aside>
+
+      <button class="reader-navigator-reveal" id="btn-reveal-navigator" type="button"
+              aria-label="展开目录与书签" title="展开目录与书签">目录</button>
+
       <div class="reader-main ai-collapsed notes-collapsed">
         <aside class="ai-panel collapsed" id="ai-panel">
           <div class="ai-panel-header">
@@ -198,8 +238,6 @@
           </form>
         </aside>
         <div class="reader-viewport">
-          <button class="nav-btn nav-btn-prev" id="btn-nav-prev" title="上一页" type="button">&lsaquo;</button>
-          <button class="nav-btn nav-btn-next" id="btn-nav-next" title="下一页" type="button">&rsaquo;</button>
           <div class="reader-epub-host" id="epub-container">
           <div class="reader-loading" id="reader-loading" role="status" aria-live="polite" hidden>
             <div class="reader-loading-spinner" aria-hidden="true"></div>
@@ -242,15 +280,6 @@
               <button class="btn btn-ghost btn-sm mobile-panel-close" id="btn-close-notes-panel" type="button">关闭</button>
             </div>
           </div>
-          <section class="bookmarks-section" aria-label="书签">
-            <div class="bookmarks-heading">
-              <span>书签</span>
-              <span class="bookmarks-count" id="bookmarks-count">0</span>
-            </div>
-            <div class="bookmarks-list" id="bookmarks-list">
-              <div class="empty-bookmarks">还没有书签</div>
-            </div>
-          </section>
           <div class="notes-list" id="notes-list">
             <div class="empty-notes">
               <p>选中文字开始划线</p>
@@ -266,17 +295,6 @@
       <button class="reader-chrome-reveal" id="btn-reveal-reader-chrome" type="button"
               aria-label="显示阅读控制栏" title="显示阅读控制栏">显示</button>
 
-      <div class="reader-footer">
-        <div class="progress-info">
-          <input type="range" id="progress-slider" min="0" max="100" value="0" class="progress-slider" aria-label="阅读进度">
-          <span class="progress-text" id="progress-text">0%</span>
-          <span class="page-text" id="page-text">页码计算中...</span>
-        </div>
-        <button class="btn btn-sync" id="btn-sync" disabled type="button">
-          <span class="sync-label">同步</span>
-          <span class="sync-badge" id="sync-badge" hidden>0</span>
-        </button>
-      </div>
     </div>
 
     <div id="creation-view" class="view">
@@ -413,6 +431,6 @@
     <div id="toast" class="toast" hidden></div>
   </div>
 
-  <script src="app.js?v=31"></script>
+  <script src="app.js?v=33"></script>
 </body>
 </html>

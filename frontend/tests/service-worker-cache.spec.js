@@ -8,9 +8,9 @@ const serviceWorkerSource = fs.readFileSync(path.join(__dirname, '..', 'sw.js'),
 
 test.describe('service worker cache policy', () => {
   test('keeps EPUB files in a stable cache across app-shell upgrades', () => {
-    expect(serviceWorkerSource).toContain("const APP_CACHE_NAME = 'marginalia-app-v32'");
-    expect(serviceWorkerSource).toContain("'app.js?v=31'");
-    expect(serviceWorkerSource).toContain("'style.css?v=29'");
+    expect(serviceWorkerSource).toContain("const APP_CACHE_NAME = 'marginalia-app-v34'");
+    expect(serviceWorkerSource).toContain("'app.js?v=33'");
+    expect(serviceWorkerSource).toContain("'style.css?v=31'");
     expect(serviceWorkerSource).toContain("const EPUB_CACHE_NAME = 'marginalia-epub-v1'");
     expect(serviceWorkerSource).toContain('migrateLegacyEpubEntries');
     expect(serviceWorkerSource).toContain('cacheFirst(event.request, EPUB_CACHE_NAME, true)');

@@ -30,14 +30,58 @@ async function openFixture(page, url = '/index.html') {
   await expect(page.locator('#reader-view')).toHaveClass(/active/);
 }
 
+async function tapReaderZoneWithTouchscreen(page, direction) {
+  await page.locator('#epub-container').evaluate((host, tapDirection) => {
+    const iframe = Array.from(host.querySelectorAll('iframe')).find(item => item.contentDocument?.body);
+    if (!iframe) throw new Error('No active EPUB iframe found');
+    const doc = iframe.contentDocument;
+    const width = iframe.clientWidth || doc.documentElement.clientWidth;
+    const height = iframe.clientHeight || doc.documentElement.clientHeight;
+    const x = width * (tapDirection === 'prev' ? 0.16 : 0.84);
+    const y = height * 0.55;
+    const touch = new Touch({
+      identifier: 41,
+      target: doc.body,
+      clientX: x,
+      clientY: y,
+    });
+    const dispatchPointer = type => doc.body.dispatchEvent(new PointerEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 41,
+      pointerType: 'touch',
+      isPrimary: true,
+      clientX: x,
+      clientY: y,
+    }));
+    dispatchPointer('pointerdown');
+    doc.body.dispatchEvent(new TouchEvent('touchstart', {
+      bubbles: true,
+      cancelable: true,
+      touches: [touch],
+      targetTouches: [touch],
+      changedTouches: [touch],
+    }));
+    dispatchPointer('pointerup');
+    doc.body.dispatchEvent(new TouchEvent('touchend', {
+      bubbles: true,
+      cancelable: true,
+      touches: [],
+      targetTouches: [],
+      changedTouches: [touch],
+    }));
+    doc.body.dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      clientX: x,
+      clientY: y,
+    }));
+  }, direction);
+}
+
 async function doubleTapIframeWithTouchscreen(page) {
-  const host = await page.locator('#epub-container').boundingBox();
-  if (!host) throw new Error('No visible EPUB host found');
-  const x = host.x + host.width * 0.5;
-  const y = host.y + host.height * 0.5;
-  await page.touchscreen.tap(x, y);
-  await page.waitForTimeout(140);
-  await page.touchscreen.tap(x, y);
+  await doubleTapIframe(page);
 }
 
 async function swipeReaderWithTouchscreen(page, {
@@ -99,6 +143,15 @@ async function swipeReaderWithTouchscreen(page, {
       changedTouches: [current],
     }));
   }, { deltaX, deltaY, duration, hold });
+}
+
+async function tapOuterIOSZone(page, direction) {
+  const selector = direction === 'next'
+    ? '.ios-reader-swipe-zone-right'
+    : '.ios-reader-swipe-zone-left';
+  const bounds = await page.locator(selector).boundingBox();
+  if (!bounds) throw new Error(`No visible iOS ${direction} tap zone found`);
+  await page.touchscreen.tap(bounds.x + bounds.width * 0.5, bounds.y + bounds.height * 0.5);
 }
 
 async function swipeOuterIOSZone(page, { direction = 'next', duration = 180 } = {}) {
@@ -196,18 +249,22 @@ async function getReaderPageInfo(page) {
   return pageInfoFromText(await page.locator('#page-text').textContent());
 }
 
-async function doubleTapIframe(page, { x = 220, y = 320 } = {}) {
+async function doubleTapIframe(page, { x = null, y = null } = {}) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const tapped = await page.locator('#epub-container').evaluate(async (host, point) => {
       const iframe = Array.from(host.querySelectorAll('iframe')).find(item => item.contentDocument?.body);
       if (!iframe) return false;
       const doc = iframe.contentDocument;
+      const width = iframe.clientWidth || doc.documentElement.clientWidth;
+      const height = iframe.clientHeight || doc.documentElement.clientHeight;
+      const tapX = Number.isFinite(point.x) ? point.x : width * 0.5;
+      const tapY = Number.isFinite(point.y) ? point.y : height * 0.5;
       const dispatchTap = () => {
         const touch = new Touch({
           identifier: 7,
           target: doc.body,
-          clientX: point.x,
-          clientY: point.y,
+          clientX: tapX,
+          clientY: tapY,
         });
         doc.dispatchEvent(new TouchEvent('touchstart', {
           bubbles: true,
@@ -320,30 +377,33 @@ test.describe('@mobile mobile layout', () => {
   test('uses a full-height reader and modal mobile tool panels', async ({ page }) => {
     await openFixture(page);
     await expectNoHorizontalOverflow(page);
-    await expect(page.locator('#btn-nav-prev')).toBeHidden();
-    await expect(page.locator('#btn-nav-next')).toBeHidden();
+    await expect(page.locator('#btn-nav-prev, #btn-nav-next')).toHaveCount(0);
 
     const readerMetrics = await page.evaluate(() => {
       const host = document.querySelector('#epub-container').getBoundingClientRect();
       const toolbar = document.querySelector('.reader-toolbar').getBoundingClientRect();
-      const footer = document.querySelector('.reader-footer').getBoundingClientRect();
       return {
         hostHeight: host.height,
         hostTop: host.top,
         hostBottom: host.bottom,
         toolbarBottom: toolbar.bottom,
-        footerTop: footer.top,
-        footerBottom: footer.bottom,
         viewportHeight: window.innerHeight,
       };
     });
     expect(readerMetrics.hostHeight).toBeGreaterThan(400);
     expect(readerMetrics.hostTop).toBeLessThan(readerMetrics.toolbarBottom);
-    expect(readerMetrics.hostBottom).toBeGreaterThan(readerMetrics.footerTop);
-    expect(readerMetrics.footerBottom).toBeLessThanOrEqual(readerMetrics.viewportHeight + 1);
+    expect(readerMetrics.hostBottom).toBeGreaterThan(readerMetrics.viewportHeight - 16);
+    await expect(page.locator('.reader-footer')).toHaveCount(0);
+    await expect(page.locator('#reader-navigator')).toBeHidden();
 
     await page.locator('#btn-reader-tools').click();
     await expect(page.locator('#reader-tool-panel')).toBeVisible();
+    await page.locator('#btn-toggle-navigator').click();
+    await expect(page.locator('#reader-navigator')).toBeVisible();
+    await expect(page.locator('#reader-panel-backdrop')).toBeVisible();
+    await page.locator('#btn-close-navigator').click();
+    await expect(page.locator('#reader-navigator')).toBeHidden();
+    await page.locator('#btn-reader-tools').click();
     await page.locator('#btn-toggle-ai').click();
     await expect(page.locator('#reader-tool-panel')).toBeHidden();
     await expect(page.locator('#ai-panel')).toBeVisible();
@@ -366,6 +426,28 @@ test.describe('@mobile mobile layout', () => {
     await expect(page.locator('#search-input')).toBeVisible();
     await page.locator('#btn-close-search-panel').click();
     await expect(page.locator('#search-panel')).toBeHidden();
+  });
+
+  test('turns exactly one page for left and right taps without duplicate navigation', async ({ page }) => {
+    await openFixture(page);
+    await expect(page.locator('#page-text')).toHaveText(/第\s*\d+\s*\/\s*\d+\s*页/, { timeout: 15_000 });
+    await expect(page.locator('#reader-view')).toHaveClass(/reader-chrome-hidden/, { timeout: 6_000 });
+    await page.waitForTimeout(350);
+
+    const initialPage = currentPageFromText(await page.locator('#page-text').textContent());
+    await tapReaderZoneWithTouchscreen(page, 'next');
+    await expect.poll(async () => currentPageFromText(
+      await page.locator('#page-text').textContent()
+    )).toBe(initialPage + 1);
+    await page.waitForTimeout(800);
+    expect(currentPageFromText(await page.locator('#page-text').textContent())).toBe(initialPage + 1);
+
+    await tapReaderZoneWithTouchscreen(page, 'prev');
+    await expect.poll(async () => currentPageFromText(
+      await page.locator('#page-text').textContent()
+    )).toBe(initialPage);
+    await page.waitForTimeout(800);
+    expect(currentPageFromText(await page.locator('#page-text').textContent())).toBe(initialPage);
   });
 
   test('turns exactly one page for horizontal swipes in both directions', async ({ page }) => {
@@ -420,6 +502,19 @@ test.describe('@mobile mobile layout', () => {
     await expect.poll(async () => currentPageFromText(
       await page.locator('#page-text').textContent()
     )).toBe(initialPage);
+
+    await page.waitForTimeout(350);
+    await tapOuterIOSZone(page, 'next');
+    await expect.poll(async () => currentPageFromText(
+      await page.locator('#page-text').textContent()
+    )).toBe(initialPage + 1);
+    await page.waitForTimeout(800);
+    expect(currentPageFromText(await page.locator('#page-text').textContent())).toBe(initialPage + 1);
+
+    await tapOuterIOSZone(page, 'prev');
+    await expect.poll(async () => currentPageFromText(
+      await page.locator('#page-text').textContent()
+    )).toBe(initialPage);
   });
 
   test('crosses chapter boundaries correctly with left and right swipes', async ({ page }) => {
@@ -432,7 +527,7 @@ test.describe('@mobile mobile layout', () => {
     let lastPageInfo = await getReaderPageInfo(page);
     for (let attempt = 0; lastPageInfo && lastPageInfo.current < lastPageInfo.total && attempt < 120; attempt += 1) {
       const previousPage = lastPageInfo.current;
-      await page.locator('#btn-nav-next').dispatchEvent('click');
+      await page.keyboard.press('ArrowRight');
       await expect.poll(async () => (await getReaderPageInfo(page))?.current || 0).toBe(previousPage + 1);
       await page.waitForTimeout(220);
       lastPageInfo = await getReaderPageInfo(page);
@@ -486,7 +581,7 @@ test.describe('@mobile mobile layout', () => {
     await revealButton.click();
     await expect(reader).not.toHaveClass(/reader-chrome-hidden/, { timeout: 1_500 });
     await expect(page.locator('.reader-toolbar')).toBeVisible();
-    await expect(page.locator('.reader-footer')).toBeVisible();
+    await expect(page.locator('.reader-footer')).toHaveCount(0);
     await expect(page.locator('.home-nav')).toBeHidden();
     await page.waitForTimeout(350);
 
@@ -495,16 +590,15 @@ test.describe('@mobile mobile layout', () => {
     const overlayMetrics = await page.evaluate(() => {
       const host = document.querySelector('#epub-container').getBoundingClientRect();
       const toolbar = document.querySelector('.reader-toolbar').getBoundingClientRect();
-      const footer = document.querySelector('.reader-footer').getBoundingClientRect();
-      return { hostTop: host.top, hostBottom: host.bottom, toolbarBottom: toolbar.bottom, footerTop: footer.top };
+      return { hostTop: host.top, hostBottom: host.bottom, toolbarBottom: toolbar.bottom, viewportHeight: window.innerHeight };
     });
     expect(overlayMetrics.hostTop).toBeLessThan(overlayMetrics.toolbarBottom);
-    expect(overlayMetrics.hostBottom).toBeGreaterThan(overlayMetrics.footerTop);
+    expect(overlayMetrics.hostBottom).toBeGreaterThan(overlayMetrics.viewportHeight - 16);
 
     await doubleTapIframeWithTouchscreen(page);
     await expect(reader).toHaveClass(/reader-chrome-hidden/);
     await expect(page.locator('.reader-toolbar')).toBeHidden();
-    await expect(page.locator('.reader-footer')).toBeHidden();
+    await expect(page.locator('.reader-footer')).toHaveCount(0);
     await expect(page.locator('.home-nav')).toBeHidden();
     await page.waitForTimeout(350);
 
@@ -524,8 +618,7 @@ test.describe('@mobile mobile layout', () => {
     await expect(reader).toHaveClass(/reader-chrome-hidden/);
     await expect(revealButton).toBeVisible();
     expect(await revealButton.boundingBox()).not.toBeNull();
-    await expect(page.locator('#btn-nav-prev')).toBeHidden();
-    await expect(page.locator('#btn-nav-next')).toBeHidden();
+    await expect(page.locator('#btn-nav-prev, #btn-nav-next')).toHaveCount(0);
     await revealButton.click();
     await expect(reader).not.toHaveClass(/reader-chrome-hidden/);
   });

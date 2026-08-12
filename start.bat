@@ -68,8 +68,9 @@ if not errorlevel 1 (
 cd /d "%PROJECT_ROOT%backend"
 echo [INFO] Python: %VENV_PYTHON%
 echo [INFO] Starting server: http://127.0.0.1:%PORT%
+echo [INFO] LAN access: http://YOUR-LAN-IP:%PORT%  ^(set ALLOWED_HOSTS in .env^)
 start "" "http://127.0.0.1:%PORT%"
-"%VENV_PYTHON%" -m uvicorn main:app --host 127.0.0.1 --port %PORT%
+"%VENV_PYTHON%" -m uvicorn main:app --host 0.0.0.0 --port %PORT%
 
 pause
 exit /b %errorlevel%

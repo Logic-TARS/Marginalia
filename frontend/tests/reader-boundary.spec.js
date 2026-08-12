@@ -93,18 +93,15 @@ async function waitForPageStable(page, timeout = 10000) {
 }
 
 /**
- * Helper: click the next button and wait for navigation to settle.
+ * Helpers: use the retained desktop keyboard navigation and wait for it to settle.
  */
-async function clickNext(page) {
-  await page.locator('#btn-nav-next').click();
+async function navigateNext(page) {
+  await page.keyboard.press('ArrowRight');
   await page.waitForTimeout(NAV_DELAY);
 }
 
-/**
- * Helper: click the prev button and wait for navigation to settle.
- */
-async function clickPrev(page) {
-  await page.locator('#btn-nav-prev').click();
+async function navigatePrev(page) {
+  await page.keyboard.press('ArrowLeft');
   await page.waitForTimeout(NAV_DELAY);
 }
 
@@ -125,6 +122,36 @@ test.describe('@smoke', () => {
     expect(containerMetrics.innerClientWidth).toBe(containerMetrics.hostClientWidth);
   });
 
+  test('opens a collapsible directory and manages bookmarks without resizing the book', async ({ page }) => {
+    await openFixture(page);
+    const navigator = page.locator('#reader-navigator');
+    const hostBefore = await page.locator('#epub-container').boundingBox();
+    const pageBefore = await getPageInfo(page);
+
+    await expect(navigator).toBeVisible();
+    await expect(page.locator('#toc-list .toc-item')).toHaveCount(3);
+    await expect(page.locator('#toc-list .toc-item').first()).toHaveAttribute('aria-current', 'location');
+    await page.locator('#btn-close-navigator').click();
+    await expect(navigator).toBeHidden();
+    await expect(page.locator('#btn-reveal-navigator')).toBeVisible();
+    expectSameBounds(await page.locator('#epub-container').boundingBox(), hostBefore);
+    expect(await getPageInfo(page)).toEqual(pageBefore);
+
+    await page.locator('#btn-reveal-navigator').click();
+    await expect(navigator).toBeVisible();
+    await page.locator('#btn-reader-tools').click();
+    await page.locator('#btn-add-bookmark').click();
+    await expect(page.locator('#bookmarks-count')).toHaveText('1');
+    await expect(page.locator('#bookmarks-list .bookmark-item')).toHaveCount(1);
+    await page.locator('#bookmarks-list .bookmark-delete').click();
+    await expect(page.locator('#bookmarks-count')).toHaveText('0');
+    await page.locator('#btn-reader-tools').click();
+
+    await page.locator('#toc-list .toc-item', { hasText: 'Chapter 2' }).click();
+    await expect(page.locator('#toolbar-chapter')).toContainText('Chapter 2');
+    await expect(page.locator('#toc-list .toc-item', { hasText: 'Chapter 2' })).toHaveAttribute('aria-current', 'location');
+  });
+
   test('desktop reader chrome floats without resizing or repaginating the book', async ({ page }) => {
     await openFixture(page);
     const reader = page.locator('#reader-view');
@@ -134,7 +161,7 @@ test.describe('@smoke', () => {
     await expect(reader).not.toHaveClass(/reader-chrome-hidden/);
     await expect(page.locator('.home-nav')).toBeHidden();
     await expect(page.locator('.reader-toolbar')).toBeVisible();
-    await expect(page.locator('.reader-footer')).toBeVisible();
+    await expect(page.locator('.reader-footer')).toHaveCount(0);
     await page.waitForTimeout(350);
 
     const visibleHost = await page.locator('#epub-container').boundingBox();
@@ -145,7 +172,7 @@ test.describe('@smoke', () => {
     await expect(reader).toHaveClass(/reader-chrome-hidden/);
     await expect(page.locator('.home-nav')).toBeHidden();
     await expect(page.locator('.reader-toolbar')).toBeHidden();
-    await expect(page.locator('.reader-footer')).toBeHidden();
+    await expect(page.locator('.reader-footer')).toHaveCount(0);
     await page.waitForTimeout(350);
 
     expectSameBounds(await page.locator('#epub-container').boundingBox(), visibleHost);
@@ -161,7 +188,7 @@ test.describe('@smoke', () => {
     expect(await getChapterLabel(page)).toBe(stableChapter);
   });
 
-  test('narrow desktop viewport keeps exact one-page button navigation', async ({ page }) => {
+  test('narrow desktop viewport keeps exact one-page keyboard navigation', async ({ page }) => {
     await page.setViewportSize({ width: 920, height: 800 });
     await openFixture(page);
 
@@ -169,7 +196,7 @@ test.describe('@smoke', () => {
     const initialPageInfo = await getPageInfo(page);
     expect(initialPageInfo).not.toBeNull();
 
-    await clickNext(page);
+    await navigateNext(page);
 
     const nextPageInfo = await getPageInfo(page);
     expect(await getChapterLabel(page)).toBe(initialChapter);
@@ -202,7 +229,7 @@ test.describe('@boundary.forward', () => {
       let previousPageInfo = startPageInfo;
       let maxClicks = Math.max(30, (startPageInfo?.total || 0) + 5);
       while (chapterLabel === startChapter && maxClicks > 0) {
-        await clickNext(page);
+        await navigateNext(page);
         chapterLabel = await getChapterLabel(page);
         const currentPageInfo = await getPageInfo(page);
         expect(currentPageInfo).not.toBeNull();
@@ -230,14 +257,10 @@ test.describe('@boundary.backward', () => {
     await openFixture(page);
 
     for (let run = 0; run < RUNS; run++) {
-      // Jump to ~40% progress to get past chapter 1
-      await page.evaluate(() => {
-        const slider = document.querySelector('#progress-slider');
-        if (slider) {
-          slider.value = 40;
-          slider.dispatchEvent(new Event('input'));
-        }
-      });
+      // Use the reader directory to enter chapter 2 before navigating backward.
+      await expect(page.locator('#toc-list .toc-item')).toHaveCount(3);
+      await page.locator('#toc-list .toc-item', { hasText: 'Chapter 2' }).click();
+      await page.locator('#btn-close-navigator').click();
       await page.waitForTimeout(JUMP_DELAY);
       await waitForChapterStable(page);
       await waitForPageStable(page);
@@ -250,7 +273,7 @@ test.describe('@boundary.backward', () => {
       // Click prev repeatedly until we land on chapter 1
       let maxClicks = 50;
       while (!chapterLabel.includes('Chapter 1') && maxClicks > 0) {
-        await clickPrev(page);
+        await navigatePrev(page);
         chapterLabel = await getChapterLabel(page);
         maxClicks--;
       }
@@ -277,9 +300,9 @@ test.describe('@boundary.intra', () => {
       const initialPage = pageInfo ? pageInfo.current : 0;
       expect(pageInfo).not.toBeNull();
 
-      // Every click, including the first one, must advance exactly one page.
+      // Every key press, including the first one, must advance exactly one page.
       for (let i = 0; i < 4; i++) {
-        await clickNext(page);
+        await navigateNext(page);
         pageInfo = await getPageInfo(page);
         const currentChapter = await getChapterLabel(page);
 

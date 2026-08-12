@@ -38,6 +38,8 @@
   const READER_DOUBLE_TAP_MAX_DISTANCE = 72;
   const READER_TAP_MAX_MOVE = 28;
   const READER_TAP_MAX_DURATION = 500;
+  const MOBILE_PAGE_TAP_ZONE_RATIO = 0.32;
+  const MOBILE_PAGE_TAP_DEDUPE_MS = 650;
   const SWIPE_INTENT_THRESHOLD = 12;
   const SWIPE_DIRECTION_RATIO = 1.15;
   const SWIPE_MAX_DURATION = 1000;
@@ -62,12 +64,9 @@
   let locationsReadyPromise = null;
   let locationsReadyBook = null;
   let lastPageInfo = null;
-  let progressJumpToken = 0;
   let layoutRefreshToken = 0;
   let isLayoutRefreshing = false;
   let pageNavigationInProgress = false;
-  let pageNavigationControlsForcedDisabled = false;
-  let progressJumpInProgress = false;
   let pageNavigationToken = 0;
   const PAGE_NAVIGATION_COOLDOWN = 180;
   let wheelGestureTimer = null;
@@ -130,8 +129,12 @@
     libraryView: $('#library-view'),
     readerView: $('#reader-view'),
     readerToolbar: $('.reader-toolbar'),
-    readerFooter: $('.reader-footer'),
     readerMain: $('.reader-main'),
+    readerNavigator: $('#reader-navigator'),
+    tocList: $('#toc-list'),
+    btnToggleNavigator: $('#btn-toggle-navigator'),
+    btnCloseNavigator: $('#btn-close-navigator'),
+    btnRevealNavigator: $('#btn-reveal-navigator'),
     bookList: $('#book-list'),
     emptyLibrary: $('#empty-library'),
     fileInput: $('#file-input'),
@@ -152,7 +155,6 @@
     notesCount: $('#notes-count'),
     toolbarBookTitle: $('#toolbar-book-title'),
     toolbarChapter: $('#toolbar-chapter'),
-    progressSlider: $('#progress-slider'),
     progressText: $('#progress-text'),
     pageText: $('#page-text'),
     btnBack: $('#btn-back'),
@@ -216,8 +218,6 @@
     btnDeleteNote: $('#btn-delete-note'),
     btnCloseModal: $('#btn-close-modal'),
     toast: $('#toast'),
-    btnNavPrev: $('#btn-nav-prev'),
-    btnNavNext: $('#btn-nav-next'),
     readerLoading: $('#reader-loading'),
     readerLoadingMessage: $('#reader-loading-message'),
     readerLoadingDetail: $('#reader-loading-detail'),
@@ -613,7 +613,6 @@
     selectedMaterialId = null;
     selectedMaterialIds.clear();
     currentDraftId = null;
-    progressJumpToken = 0;
     _boundIframeDocuments = new WeakSet();
     locationsReadyPromise = null;
     locationsReadyBook = null;
@@ -735,6 +734,7 @@
 
   function hasOpenReaderSurface() {
     return !dom.readerToolPanel.hidden ||
+      (isMobileLayout() && !dom.readerNavigator.classList.contains('collapsed')) ||
       !dom.aiPanel.classList.contains('collapsed') ||
       !dom.notesPanel.classList.contains('collapsed') ||
       !dom.searchPanel.hidden ||
@@ -776,7 +776,6 @@
     dom.readerView.classList.toggle('reader-chrome-hidden', !shouldShow);
     document.body.classList.toggle('reader-chrome-hidden', !shouldShow && readerIsActive);
     setChromeElementHidden(dom.readerToolbar, !shouldShow);
-    setChromeElementHidden(dom.readerFooter, !shouldShow);
 
     if (shouldShow && autoHide) scheduleReaderChromeHide();
     return true;
@@ -941,12 +940,14 @@
     dom.readerView.classList.remove('reader-chrome-hidden');
     document.body.classList.remove('reader-chrome-hidden');
     setChromeElementHidden(dom.readerToolbar, false);
-    setChromeElementHidden(dom.readerFooter, false);
   }
 
   function syncReaderToolStates() {
     if (dom.btnReaderTools) {
       dom.btnReaderTools.setAttribute('aria-expanded', String(!dom.readerToolPanel.hidden));
+    }
+    if (dom.btnToggleNavigator) {
+      dom.btnToggleNavigator.setAttribute('aria-expanded', String(!dom.readerNavigator.classList.contains('collapsed')));
     }
     if (dom.btnToggleAi) {
       dom.btnToggleAi.setAttribute('aria-expanded', String(!dom.aiPanel.classList.contains('collapsed')));
@@ -964,6 +965,7 @@
 
   function syncReaderPanelBackdrop() {
     const hasOpenPanel = isMobileLayout() && dom.readerView.classList.contains('active') && (
+      !dom.readerNavigator.classList.contains('collapsed') ||
       !dom.aiPanel.classList.contains('collapsed') ||
       !dom.notesPanel.classList.contains('collapsed') ||
       !dom.searchPanel.hidden ||
@@ -975,6 +977,12 @@
 
   function closeOtherMobileReaderPanels(except) {
     if (!isMobileLayout()) return;
+    if (except !== 'navigator') {
+      dom.readerNavigator.classList.remove('open');
+      dom.readerNavigator.classList.add('collapsed');
+      dom.readerNavigator.setAttribute('aria-hidden', 'true');
+      dom.readerView.classList.remove('navigator-open');
+    }
     if (except !== 'ai') {
       dom.aiPanel.classList.add('collapsed');
       dom.readerMain.classList.add('ai-collapsed');
@@ -996,7 +1004,8 @@
 
   function closeMobileReaderPanels({ restoreFocus = false } = {}) {
     if (!isMobileLayout()) return false;
-    const hadOpenPanel = !dom.aiPanel.classList.contains('collapsed') ||
+    const hadOpenPanel = !dom.readerNavigator.classList.contains('collapsed') ||
+      !dom.aiPanel.classList.contains('collapsed') ||
       !dom.notesPanel.classList.contains('collapsed') ||
       !dom.searchPanel.hidden ||
       !dom.ttsPanel.hidden;
@@ -1009,6 +1018,36 @@
       if (restoreFocus) safeFocus(dom.btnReaderTools);
     }
     return hadOpenPanel;
+  }
+
+  function setReaderNavigatorOpen(open, { restoreFocus = false } = {}) {
+    const shouldOpen = Boolean(open);
+    if (shouldOpen) {
+      setReaderChromeVisible(true);
+      cancelReaderChromeHide();
+      closeOtherMobileReaderPanels('navigator');
+      if (isMobileLayout()) {
+        setReaderToolsOpen(false, { skipChromeSchedule: true });
+      } else if (!dom.aiPanel.classList.contains('collapsed')) {
+        dom.aiPanel.classList.add('collapsed');
+        dom.readerMain.classList.add('ai-collapsed');
+        refreshReaderLayout();
+      }
+    }
+    dom.readerNavigator.classList.toggle('open', shouldOpen);
+    dom.readerNavigator.classList.toggle('collapsed', !shouldOpen);
+    dom.readerNavigator.setAttribute('aria-hidden', String(!shouldOpen));
+    dom.readerView.classList.toggle('navigator-open', shouldOpen);
+    syncReaderToolStates();
+    syncReaderPanelBackdrop();
+    if (!shouldOpen) {
+      if (restoreFocus) safeFocus(dom.btnToggleNavigator);
+      scheduleReaderChromeHide();
+    }
+  }
+
+  function toggleReaderNavigator() {
+    setReaderNavigatorOpen(dom.readerNavigator.classList.contains('collapsed'));
   }
 
   function setReaderToolsOpen(open, { restoreFocus = false, skipChromeSchedule = false } = {}) {
@@ -1429,6 +1468,15 @@
   }
 
   // ==================== BOOK IMPORT ====================
+  function formatUploadError(xhr, payload) {
+    const detail = payload.detail && (payload.detail.message || payload.detail);
+    if (typeof detail === 'string') return detail;
+    if (xhr.status === 400) return '服务器拒绝当前访问地址，请检查 ALLOWED_HOSTS 是否包含局域网 IP';
+    if (xhr.status === 413) return 'EPUB 文件过大，请调高 MAX_EPUB_UPLOAD_MB 后重启服务器';
+    if (xhr.status === 415) return '只支持有效的 .epub 文件';
+    return `服务器响应 ${xhr.status}`;
+  }
+
   function uploadBookToServer(arrayBuffer, filename, title = '', author = '', onProgress = null) {
     return new Promise((resolve, reject) => {
       const form = new FormData();
@@ -1458,8 +1506,7 @@
           // The status code below still provides a useful fallback.
         }
         if (xhr.status < 200 || xhr.status >= 300) {
-          const detail = payload.detail && (payload.detail.message || payload.detail);
-          reject(new Error(typeof detail === 'string' ? detail : `Server responded with ${xhr.status}`));
+          reject(new Error(formatUploadError(xhr, payload)));
           return;
         }
         if (!payload.book) {
@@ -1541,16 +1588,20 @@
     return merged;
   }
 
+  function shouldAutoUploadLocalBook(book) {
+    if (!book || !book.file_blob) return false;
+    if (book.source === 'server' || book.server_book_id) return false;
+    if (serverMigrationsInFlight.has(book.id)) return false;
+
+    const status = book.transfer_status || 'local_only';
+    return status === 'local_ready' || status === 'local_only';
+  }
+
   async function migrateLocalBooksToServer() {
     if (!navigator.onLine) return;
     const books = await dbGetAll('books');
     for (const book of books) {
-      if (
-        !book.file_blob ||
-        book.source === 'server' ||
-        book.server_book_id ||
-        serverMigrationsInFlight.has(book.id)
-      ) continue;
+      if (!shouldAutoUploadLocalBook(book)) continue;
       await uploadLocalBookInBackground(book, book.file_blob, { announce: false });
     }
   }
@@ -1625,7 +1676,7 @@
       return merged;
     } catch (err) {
       book.migration_error = err.message;
-      await setBookTransferState(book, 'failed', book.transfer_progress || 0, err.message);
+      await setBookTransferState(book, 'failed', null, err.message);
       setOperationStatus({
         bookId: book.id,
         message: `《${book.book_title}》上传失败`,
@@ -2054,6 +2105,7 @@
     // display and location sync complete.
     dom.toolbarBookTitle.textContent = '打开中...';
     dom.toolbarChapter.textContent = '加载中…';
+    dom.tocList.innerHTML = '<div class="empty-toc">正在读取目录…</div>';
 
     // Update last opened
     bookMeta.last_opened = Date.now();
@@ -2144,7 +2196,6 @@
 
       // Full-book location generation can take minutes for large EPUBs. It is
       // useful for percentages and jumps, but must never block the first page.
-      dom.progressSlider.disabled = true;
       dom.pageText.textContent = '正在计算页码…';
       warmLocationsWithProgress(book).catch((err) => {
         console.warn('Location generation failed:', err);
@@ -2154,9 +2205,12 @@
       // Load bookmarks/navigation for chapter titles
       book.loaded.navigation.then((nav) => {
         // nav.toc gives us chapter structure
-        if (nav.toc && nav.toc.length > 0) {
-          currentBook._toc = nav.toc;
-        }
+        currentBook._toc = Array.isArray(nav.toc) ? nav.toc : [];
+        renderTableOfContents(currentBook._toc);
+        updateTocActiveState(currentChapterId);
+      }).catch((err) => {
+        console.warn('EPUB navigation load failed:', err);
+        renderTableOfContents([]);
       });
 
       dom.epubContainer.style.display = '';
@@ -2195,6 +2249,7 @@
     }
     if (nextChapterId) currentChapterId = nextChapterId;
     updateChapterLabel(location);
+    updateTocActiveState(location.start.href || '');
     let percent = location.start.percentage;
     if (percent == null) {
       percent = percentageFromCfi(currentCfi);
@@ -2203,7 +2258,6 @@
     const pct = Math.round(percent * 100);
 
     // Update progress UI
-    dom.progressSlider.value = pct;
     dom.progressText.textContent = pct + '%';
     updatePageUI();
 
@@ -2280,7 +2334,6 @@
     }
     if (percent == null) return;
     const pct = Math.round(percent * 100);
-    dom.progressSlider.value = pct;
     dom.progressText.textContent = pct + '%';
     updatePageUI();
   }
@@ -2439,20 +2492,6 @@
       dom.readerView.classList.toggle('tts-navigation-locked', locked);
       dom.readerView.setAttribute('aria-busy', String(locked));
     }
-    const pageButtonsDisabled = locked || pageNavigationControlsForcedDisabled || isLayoutRefreshing;
-    if (dom.btnNavPrev) {
-      dom.btnNavPrev.disabled = pageButtonsDisabled;
-      dom.btnNavPrev.title = locked ? '朗读跟随中，请先暂停' : '上一页';
-    }
-    if (dom.btnNavNext) {
-      dom.btnNavNext.disabled = pageButtonsDisabled;
-      dom.btnNavNext.title = locked ? '朗读跟随中，请先暂停' : '下一页';
-    }
-    if (dom.progressSlider) {
-      const locations = currentBook && currentBook.locations;
-      dom.progressSlider.disabled = locked || progressJumpInProgress || getLocationCount(locations) <= 0;
-      dom.progressSlider.title = locked ? '朗读跟随中，请先暂停后跳转' : '';
-    }
   }
 
   function blockManualNavigationDuringTts() {
@@ -2460,11 +2499,6 @@
     showTtsNavigationLockedNotice();
     syncReaderNavigationControls();
     return true;
-  }
-
-  function setPageNavigationDisabled(disabled) {
-    pageNavigationControlsForcedDisabled = disabled;
-    syncReaderNavigationControls();
   }
 
   function navigatePageWhenReady(direction, source, attempt = 0) {
@@ -2490,7 +2524,6 @@
     releaseTransferredProgressFloor();
     pageNavigationInProgress = true;
     pageNavigationToken += 1;
-    setPageNavigationDisabled(true);
 
     let navigation;
     try {
@@ -2541,7 +2574,6 @@
     } catch (err) {
       console.warn('Page navigation failed:', source, err);
       pageNavigationInProgress = false;
-      setPageNavigationDisabled(false);
       return Promise.resolve(false);
     }
 
@@ -2557,7 +2589,6 @@
       .finally(() => {
         window.setTimeout(() => {
           pageNavigationInProgress = false;
-          setPageNavigationDisabled(false);
         }, PAGE_NAVIGATION_COOLDOWN);
       });
   }
@@ -2582,63 +2613,38 @@
       .catch((err) => {
         locationsReadyBook = null;
         locationsReadyPromise = null;
-        dom.progressSlider.disabled = true;
         throw err;
       });
 
     return locationsReadyPromise;
   }
 
-  async function jumpToProgress(percent) {
-    if (blockManualNavigationDuringTts()) {
-      updateProgressUI();
-      return;
-    }
-    if (!currentRendition || !currentRendition.book || !currentRendition.book.locations) return;
-    releaseTransferredProgressFloor();
-    const jumpToken = ++progressJumpToken;
-    const previousValue = dom.progressSlider.value;
-
-    try {
-      const locations = currentRendition.book.locations;
-      progressJumpInProgress = true;
-      syncReaderNavigationControls();
-      dom.progressText.textContent = getLocationCount(locations) > 0 ? '跳转中...' : '定位中...';
-      setReaderLoading('正在跳转...', '正在定位目标位置');
-      await warmLocationsWithProgress(currentRendition.book);
-      if (jumpToken !== progressJumpToken) return;
-
-      const cfiResult = locations.cfiFromPercentage(percent);
-      const cfi = cfiResult && typeof cfiResult.then === 'function'
-        ? await cfiResult
-        : cfiResult;
-      if (jumpToken !== progressJumpToken) return;
-
-      if (cfi) {
-        await currentRendition.display(cfi);
-        if (jumpToken === progressJumpToken) updateProgressUI();
-      } else {
-        showToast('暂时无法跳转到该位置', 'warning');
-        updateProgressUI();
-      }
-    } catch (err) {
-      console.warn('Progress jump failed:', err);
-      dom.progressSlider.value = previousValue;
-      showToast('进度跳转失败', 'error');
-      updateProgressUI();
-    } finally {
-      if (jumpToken === progressJumpToken) {
-        progressJumpInProgress = false;
-        syncReaderNavigationControls();
-        hideReaderLoading();
-      }
-    }
-  }
-
   // ==================== IFRAME NAVIGATION ====================
   // epub.js renders inside an iframe — all interaction must go through the iframe's document
   let _boundIframeDocuments = new WeakSet();
   let outerSwipeFallbackBound = false;
+  let lastMobilePageTapAt = 0;
+  let suppressMobileClickNavigationUntil = 0;
+
+  function getMobilePageTapDirection(clientX, viewportWidth) {
+    if (!isMobileLayout() || !Number.isFinite(clientX) || viewportWidth <= 0) return null;
+    if (clientX <= viewportWidth * MOBILE_PAGE_TAP_ZONE_RATIO) return 'prev';
+    if (clientX >= viewportWidth * (1 - MOBILE_PAGE_TAP_ZONE_RATIO)) return 'next';
+    return null;
+  }
+
+  function triggerMobilePageTap(clientX, viewportWidth, source) {
+    const direction = getMobilePageTapDirection(clientX, viewportWidth);
+    if (!direction) return false;
+
+    const now = Date.now();
+    if (now - lastMobilePageTapAt >= MOBILE_PAGE_TAP_DEDUPE_MS) {
+      lastMobilePageTapAt = now;
+      setGestureDebug(`${source} → ${direction === 'next' ? '下一页' : '上一页'}`);
+      navigatePageWhenReady(direction, source);
+    }
+    return true;
+  }
 
   function setGestureDebug(message) {
     if (!GESTURE_DEBUG_ENABLED) return;
@@ -2744,6 +2750,7 @@
         x: touch.clientX,
         y: touch.clientY,
         at: Date.now(),
+        target: event.target,
         intent: null,
         triggered: false,
       };
@@ -2793,6 +2800,18 @@
       const absX = Math.abs(deltaX);
       const absY = Math.abs(deltaY);
       const elapsed = Math.max(1, Date.now() - gesture.at);
+      const moved = Math.hypot(deltaX, deltaY);
+      const viewportRect = viewport.getBoundingClientRect();
+      if (
+        !gesture.intent &&
+        elapsed <= READER_TAP_MAX_DURATION &&
+        moved <= READER_TAP_MAX_MOVE &&
+        triggerMobilePageTap(touch.clientX - viewportRect.left, viewportRect.width, 'ios-outer-tap')
+      ) {
+        if (event.cancelable) event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       const horizontal = gesture.intent === 'horizontal' || (
         !gesture.intent && absX >= absY * SWIPE_DIRECTION_RATIO
       );
@@ -3008,6 +3027,7 @@
     gestureTarget.addEventListener('touchend', (event) => {
       scheduleIframeSelectionCapture(doc, iframe, 90);
       if (!touchStart || event.changedTouches.length !== 1 || !currentRendition) return;
+      suppressMobileClickNavigationUntil = Date.now() + MOBILE_PAGE_TAP_DEDUPE_MS;
       const start = touchStart;
       touchStart = null;
       const selection = doc.getSelection();
@@ -3024,7 +3044,7 @@
         lastReaderTap = null;
         return;
       }
-      const canToggleChrome =
+      const canHandleReaderTap =
         !start.intent &&
         !start.blocked &&
         elapsed <= READER_TAP_MAX_DURATION &&
@@ -3036,7 +3056,15 @@
         Date.now() >= selectionInteractionUntil &&
         !hasOpenReaderSurface();
 
-      if (canToggleChrome) {
+      const frameWidth = doc.documentElement.clientWidth || iframe.clientWidth || window.innerWidth;
+      if (canHandleReaderTap && triggerMobilePageTap(touch.clientX, frameWidth, 'touch-tap')) {
+        event.preventDefault();
+        event.stopPropagation();
+        lastReaderTap = null;
+        return;
+      }
+
+      if (canHandleReaderTap) {
         const now = Date.now();
         const isDoubleTap = lastReaderTap &&
           now - lastReaderTap.at <= READER_DOUBLE_TAP_MAX_MS &&
@@ -3247,6 +3275,7 @@
         x: event.clientX,
         y: event.clientY,
         at: Date.now(),
+        target: event.target,
         hadSelection,
         intent: null,
         triggered: false,
@@ -3311,6 +3340,7 @@
       ) return;
       const start = pointerStart;
       pointerStart = null;
+      suppressMobileClickNavigationUntil = Date.now() + MOBILE_PAGE_TAP_DEDUPE_MS;
       if (start.triggered || start.blocked || start.hadSelection || isReaderGestureBlocked()) return;
 
       const deltaX = event.clientX - start.x;
@@ -3318,6 +3348,20 @@
       const absX = Math.abs(deltaX);
       const absY = Math.abs(deltaY);
       const elapsed = Math.max(1, Date.now() - start.at);
+      const moved = Math.hypot(deltaX, deltaY);
+      const frameWidth = doc.documentElement.clientWidth || iframe.clientWidth || window.innerWidth;
+      if (
+        !start.intent &&
+        elapsed <= READER_TAP_MAX_DURATION &&
+        moved <= READER_TAP_MAX_MOVE &&
+        !isBlockedReaderGestureTarget(start.target) &&
+        triggerMobilePageTap(event.clientX, frameWidth, 'pointer-tap')
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        lastReaderTap = null;
+        return;
+      }
       const horizontalIntent = start.intent === 'horizontal' || (
         !start.intent && absX >= absY * SWIPE_DIRECTION_RATIO
       );
@@ -3352,7 +3396,22 @@
     // Hide toolbar when clicking empty space (no selection after click). Do not
     // clear immediately after a mobile selection gesture: some browsers emit a
     // synthetic click before their Selection object has settled.
-    doc.addEventListener('click', () => {
+    doc.addEventListener('click', (event) => {
+      const frameWidth = doc.documentElement.clientWidth || iframe.clientWidth || window.innerWidth;
+      const canHandleClickTap =
+        event.button === 0 &&
+        Date.now() >= suppressMobileClickNavigationUntil &&
+        !isBlockedReaderGestureTarget(event.target) &&
+        !hasSelectionText(doc.getSelection()) &&
+        !pendingSelection &&
+        Date.now() >= selectionInteractionUntil &&
+        !hasOpenReaderSurface();
+      if (canHandleClickTap && triggerMobilePageTap(event.clientX, frameWidth, 'click-tap')) {
+        event.preventDefault();
+        event.stopPropagation();
+        lastReaderTap = null;
+        return;
+      }
       setTimeout(() => {
         const sel = doc.getSelection();
         if (!hasSelectionText(sel) && Date.now() >= selectionInteractionUntil) {
@@ -4715,7 +4774,81 @@
     scheduleReaderChromeHide();
   }
 
-  // ==================== BOOKMARKS ====================
+  // ==================== TABLE OF CONTENTS / BOOKMARKS ====================
+  function normalizeReaderHref(value) {
+    const href = String(value || '').split('#', 1)[0].replace(/^\.\//, '');
+    try {
+      return decodeURIComponent(href);
+    } catch (_err) {
+      return href;
+    }
+  }
+
+  function renderTableOfContents(items) {
+    if (!dom.tocList) return;
+    const toc = Array.isArray(items) ? items : [];
+    dom.tocList.innerHTML = '';
+    if (!toc.length) {
+      dom.tocList.innerHTML = '<div class="empty-toc">本书没有可用目录</div>';
+      return;
+    }
+
+    const appendItems = (entries, depth = 0) => {
+      for (const item of entries) {
+        const href = String(item.href || '');
+        const label = String(item.label || item.title || '未命名章节').trim();
+        if (href) {
+          const button = document.createElement('button');
+          button.className = 'toc-item';
+          button.type = 'button';
+          button.dataset.href = normalizeReaderHref(href);
+          button.style.setProperty('--toc-depth', String(Math.min(depth, 5)));
+          button.textContent = label;
+          button.title = label;
+          button.addEventListener('click', () => gotoTocItem(item));
+          dom.tocList.appendChild(button);
+        }
+        const children = item.subitems || item.children || [];
+        if (Array.isArray(children) && children.length) appendItems(children, depth + 1);
+      }
+    };
+    appendItems(toc);
+  }
+
+  function updateTocActiveState(href) {
+    if (!dom.tocList) return;
+    const currentHref = normalizeReaderHref(href);
+    let activeButton = null;
+    for (const button of dom.tocList.querySelectorAll('.toc-item')) {
+      const itemHref = normalizeReaderHref(button.dataset.href);
+      const active = Boolean(currentHref && itemHref && (
+        currentHref === itemHref || currentHref.endsWith('/' + itemHref) || itemHref.endsWith('/' + currentHref)
+      ));
+      button.classList.toggle('active', active);
+      if (active) {
+        button.setAttribute('aria-current', 'location');
+        activeButton = button;
+      } else {
+        button.removeAttribute('aria-current');
+      }
+    }
+    if (activeButton && !dom.readerNavigator.classList.contains('collapsed')) {
+      activeButton.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  async function gotoTocItem(item) {
+    if (blockManualNavigationDuringTts()) return;
+    if (!currentRendition || !item || !item.href) return;
+    try {
+      await currentRendition.display(item.href);
+      if (isMobileLayout()) setReaderNavigatorOpen(false);
+    } catch (err) {
+      console.warn('Failed to navigate to chapter:', err);
+      showToast('无法打开该章节', 'warning');
+    }
+  }
+
   async function addBookmark() {
     if (!currentBookMeta || !currentRendition) return;
     const cfi = getCurrentAnchorCfi();
@@ -4724,7 +4857,7 @@
       return;
     }
 
-    const progress = currentBookMeta.progress_percent || parseInt(dom.progressSlider.value || '0', 10) || 0;
+    const progress = Number(currentBookMeta.progress_percent || 0);
     const chapter = currentChapter || dom.toolbarChapter.textContent || '正文';
     const now = Date.now();
     const bookmark = {
@@ -4792,9 +4925,7 @@
     if (!currentRendition || !bookmark || !bookmark.cfi) return;
     try {
       await currentRendition.display(bookmark.cfi);
-      if (window.innerWidth <= 768) {
-        dom.notesPanel.classList.remove('open');
-      }
+      if (isMobileLayout()) setReaderNavigatorOpen(false);
     } catch (err) {
       console.warn('Failed to navigate to bookmark:', err);
       showToast('无法定位到该书签', 'warning');
@@ -4967,6 +5098,7 @@
     if (shouldOpen) {
       setReaderChromeVisible(true);
       cancelReaderChromeHide();
+      if (!isMobileLayout()) setReaderNavigatorOpen(false);
       closeOtherMobileReaderPanels('ai');
       if (isMobileLayout()) setReaderToolsOpen(false, { skipChromeSchedule: true });
     }
@@ -5769,7 +5901,7 @@
 
   // ==================== EVENT BINDINGS ====================
   function bindEvents() {
-    [dom.readerToolbar, dom.readerFooter, dom.readerToolPanel].forEach((element) => {
+    [dom.readerToolbar, dom.readerToolPanel].forEach((element) => {
       if (!element) return;
       element.addEventListener('pointerdown', () => {
         if (!dom.readerView.classList.contains('active')) return;
@@ -5798,6 +5930,9 @@
 
     // AI book Q&A
     dom.btnReaderTools.addEventListener('click', toggleReaderTools);
+    dom.btnToggleNavigator.addEventListener('click', toggleReaderNavigator);
+    dom.btnCloseNavigator.addEventListener('click', () => setReaderNavigatorOpen(false, { restoreFocus: true }));
+    dom.btnRevealNavigator.addEventListener('click', () => setReaderNavigatorOpen(true));
     dom.btnRevealReaderChrome.addEventListener('click', () => revealReaderChromeTemporarily());
     dom.btnToggleAi.addEventListener('click', () => toggleAiPanel());
     dom.btnCloseAi.addEventListener('click', () => toggleAiPanel(false));
@@ -5992,22 +6127,6 @@
     dom.btnSearchClose.addEventListener('click', toggleSearchPanel);
     dom.btnCloseSearchPanel.addEventListener('click', () => setSearchPanelOpen(false));
 
-    // Progress slider
-    dom.progressSlider.addEventListener('input', (e) => {
-      cancelReaderChromeHide();
-      const pct = parseInt(dom.progressSlider.value);
-      dom.progressText.textContent = pct + '%';
-      if (!e.isTrusted && currentRendition) {
-        jumpToProgress(pct / 100);
-      }
-    });
-    dom.progressSlider.addEventListener('change', () => {
-      if (!currentRendition) return;
-      const pct = parseInt(dom.progressSlider.value) / 100;
-      jumpToProgress(pct);
-      scheduleReaderChromeHide();
-    });
-
     // Sync button
     dom.btnSync.addEventListener('click', syncToBackend);
 
@@ -6090,18 +6209,6 @@
       }
     });
 
-    // Page navigation buttons
-    dom.btnNavPrev.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      navigatePage('prev', 'button');
-    });
-    dom.btnNavNext.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      navigatePage('next', 'button');
-    });
-
     // Online/offline
     window.addEventListener('popstate', (event) => {
       handleHistoryNavigation(event).catch((err) => {
@@ -6125,6 +6232,7 @@
       dom.notesPanel.classList.remove('open');
       document.body.classList.remove('reader-panel-open');
       resetReaderChrome();
+      setReaderNavigatorOpen(!isMobileLayout());
       syncReaderPanelBackdrop();
       refreshReaderLayout();
       if (dom.readerView.classList.contains('active')) scheduleReaderChromeHide(READER_CHROME_INITIAL_HIDE_MS);
@@ -6160,6 +6268,7 @@
 
     loadReaderChromeAutoHidePreference();
     loadReaderTypographyPreference();
+    setReaderNavigatorOpen(!isMobileLayout());
     loadTtsVoices().catch(() => {});
     observeReaderIframes();
     bindEvents();

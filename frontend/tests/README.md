@@ -9,11 +9,11 @@ npx playwright test
 ```
 
 ## Test Tags
-- `@smoke` — verifies the EPUB fixture loads correctly and desktop immersive controls can be restored
+- `@smoke` — verifies the EPUB fixture, collapsible directory/bookmark drawer, bookmark management, and desktop immersive controls
 - `@boundary.forward` — cross-section forward navigation lands on page 1 of new chapter
 - `@boundary.backward` — cross-section backward navigation lands on last page of prior chapter
 - `@boundary.intra` — same-section navigation advances exactly +1/-1 page
-- `@mobile` — checks common mobile widths, safe-area reader controls, horizontal swipe pagination, configurable immersive reader chrome, modal reader tools, and touch-style text highlighting
+- `@mobile` — checks common mobile widths, safe-area reader controls, the modal directory/bookmark drawer, horizontal swipe pagination, configurable immersive reader chrome, modal reader tools, and touch-style text highlighting
 - `navigation.spec.js` — verifies that reading and creation are entered only from the home screen and that browser history returns to, and can restore from, the home screen
 - `import-ux.spec.js` — verifies first-open download feedback, IndexedDB EPUB reuse, content-hash invalidation, and storage-quota fallback
 - `service-worker-cache.spec.js` — verifies that versioned app caches are separate from the stable EPUB cache

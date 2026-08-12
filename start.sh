@@ -46,4 +46,5 @@ fi
 cd "$PROJECT_ROOT/backend"
 echo "[INFO] Python: $VENV_PYTHON"
 echo "[INFO] Starting server: http://127.0.0.1:$PORT"
-exec "$VENV_PYTHON" -m uvicorn main:app --host 127.0.0.1 --port "$PORT"
+echo "[INFO] LAN access: http://YOUR-LAN-IP:$PORT  (set ALLOWED_HOSTS in .env)"
+exec "$VENV_PYTHON" -m uvicorn main:app --host 0.0.0.0 --port "$PORT"

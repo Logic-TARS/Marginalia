@@ -240,9 +240,8 @@ test.describe('automatic narration player', () => {
     await expect(page.locator('#tts-status')).toContainText('正在播放', { timeout: 10_000 });
     await expect(page.locator('#tts-audio')).toHaveAttribute('data-mock-playing', 'true');
     await expect(page.locator('#reader-view')).toHaveClass(/tts-navigation-locked/);
-    await expect(page.locator('#btn-nav-prev')).toBeDisabled();
-    await expect(page.locator('#btn-nav-next')).toBeDisabled();
-    await expect(page.locator('#progress-slider')).toBeDisabled();
+    await expect(page.locator('#btn-nav-prev, #btn-nav-next')).toHaveCount(0);
+    await expect(page.locator('#progress-slider')).toHaveCount(0);
     const iframe = page.locator('#epub-container iframe').first();
     await expect.poll(() => iframe.evaluate(frame => frame.contentDocument.documentElement.dataset.ttsFollowText)).toBe('Chapter');
     await expect.poll(() => page.evaluate(() => window.__ttsDisplayTargets.length)).toBeGreaterThan(0);
@@ -274,7 +273,9 @@ test.describe('automatic narration player', () => {
     const pageBeforeLockedNavigation = await page.locator('#page-text').textContent();
     await page.keyboard.press('ArrowRight');
     await iframe.evaluate(frame => frame.contentDocument.dispatchEvent(new WheelEvent('wheel', { deltaY: 180, cancelable: true })));
+    await page.locator('#toc-list .toc-item', { hasText: 'Chapter 2' }).click();
     await expect(page.locator('#page-text')).toHaveText(pageBeforeLockedNavigation);
+    await expect(page.locator('#toolbar-chapter')).toContainText('Chapter 1');
 
     // A late cue is on a distant page: narration may follow it even while manual navigation is locked.
     await page.locator('#tts-audio').evaluate(audio => {
@@ -290,7 +291,6 @@ test.describe('automatic narration player', () => {
     await expect(page.locator('#tts-status')).toContainText('已暂停');
     await expect(page.locator('#tts-audio')).toHaveAttribute('data-mock-playing', 'false');
     await expect(page.locator('#reader-view')).not.toHaveClass(/tts-navigation-locked/);
-    await expect(page.locator('#btn-nav-next')).toBeEnabled();
     await expect.poll(() => iframe.evaluate(frame => frame.contentDocument.documentElement.dataset.ttsFollowText)).toBe(finalCueText);
     expect(await page.evaluate(() => window.__ttsUnderlineRemovals.length)).toBe(underlineRemovalsBeforePause);
     await page.click('#btn-tts-play');
@@ -325,12 +325,8 @@ test.describe('automatic narration player', () => {
     await page.click('#btn-tts-pause');
     await expect(page.locator('#reader-view')).not.toHaveClass(/tts-navigation-locked/);
 
-    // A chapter switch must cancel the active task view and reset controls.
-    await page.evaluate(() => {
-      const slider = document.querySelector('#progress-slider');
-      slider.value = 40;
-      slider.dispatchEvent(new Event('input'));
-    });
+    // A directory chapter switch must cancel the active task view and reset controls.
+    await page.locator('#toc-list .toc-item', { hasText: 'Chapter 2' }).click();
     await expect(page.locator('#toolbar-chapter')).not.toContainText('Chapter 1', { timeout: 15_000 });
     await expect(page.locator('#tts-segment-label')).toHaveText('第 0 / 0 段');
     await expect(page.locator('#tts-audio')).toHaveAttribute('data-mock-playing', 'false');

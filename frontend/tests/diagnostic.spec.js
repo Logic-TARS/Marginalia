@@ -36,7 +36,7 @@ test.describe('@probe', () => {
       if (dumpCount >= 3) break;
 
       try {
-        await page.click('#btn-nav-next');
+        await page.keyboard.press('ArrowRight');
         await page.waitForTimeout(600);
       } catch (e) {
         // Navigation might fail if at end of book — stop trying
