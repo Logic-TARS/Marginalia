@@ -54,6 +54,61 @@ async def _connect() -> aiosqlite.Connection:
     return db
 
 
+_FTS_TOKENIZER = "unicode61"
+
+
+async def _init_chunks_fts(db: aiosqlite.Connection) -> None:
+    """Create or migrate the chunk FTS index.
+
+    Prefers the trigram tokenizer because unicode61 never splits CJK text,
+    which made FTS recall useless for Chinese books. Existing databases
+    built with a different tokenizer are rebuilt from qa_chunks.
+    """
+    global _FTS_TOKENIZER
+    try:
+        await db.execute(
+            "CREATE VIRTUAL TABLE temp._fts_probe USING fts5(x, tokenize='trigram')"
+        )
+        await db.execute("DROP TABLE temp._fts_probe")
+        _FTS_TOKENIZER = "trigram"
+    except aiosqlite.Error:
+        _FTS_TOKENIZER = "unicode61"
+
+    rows = await db.execute_fetchall(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='qa_chunks_fts'"
+    )
+    existing_sql = rows[0]["sql"] if rows else ""
+    if existing_sql and f"tokenize='{_FTS_TOKENIZER}'" not in existing_sql:
+        await db.execute("DROP TABLE qa_chunks_fts")
+        existing_sql = ""
+
+    if not existing_sql:
+        await db.execute(f"""
+            CREATE VIRTUAL TABLE qa_chunks_fts USING fts5(
+                chunk_id UNINDEXED, book_id UNINDEXED, text, tokenize='{_FTS_TOKENIZER}'
+            )
+        """)
+        await db.execute(
+            "INSERT INTO qa_chunks_fts(chunk_id, book_id, text)"
+            " SELECT id, book_id, text FROM qa_chunks"
+        )
+
+
+def _fts_query_terms(question: str) -> list[str]:
+    """Extract MATCH terms, adapted to the active FTS tokenizer."""
+    lowered = question.lower()
+    if _FTS_TOKENIZER != "trigram":
+        return re.findall(r"[\w\u4e00-\u9fff]{2,}", lowered)[:8]
+    terms = []
+    for term in re.findall(r"[a-z0-9_]{2,}|[\u4e00-\u9fff]+", lowered):
+        if re.fullmatch(r"[a-z0-9_]+", term):
+            terms.append(term)
+        else:
+            # trigram tokens need >= 3 chars; window CJK runs accordingly
+            terms.extend(term[i : i + 3] for i in range(0, len(term) - 2, 3))
+    return terms[:8]
+
+
 async def init_knowledge_db() -> None:
     KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
     db = await _connect()
@@ -93,9 +148,6 @@ async def init_knowledge_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_qa_chunks_book_run
                 ON qa_chunks(book_id, run_id, ordinal);
-            CREATE VIRTUAL TABLE IF NOT EXISTS qa_chunks_fts USING fts5(
-                chunk_id UNINDEXED, book_id UNINDEXED, text, tokenize='unicode61'
-            );
             CREATE TABLE IF NOT EXISTS qa_conversations (
                 id TEXT PRIMARY KEY,
                 book_id TEXT NOT NULL,
@@ -121,6 +173,7 @@ async def init_knowledge_db() -> None:
                 ON qa_messages(conversation_id, created_at);
             """
         )
+        await _init_chunks_fts(db)
         await db.execute(
             "UPDATE qa_books SET status='pending', error_code='interrupted', "
             "error_message='索引进程已重启，正在重新排队' WHERE status='indexing'"
@@ -226,6 +279,10 @@ async def register_uploaded_book(
             413,
             "upload_too_large",
         )
+    if not filename.lower().endswith(".epub"):
+        raise KnowledgeError(
+            "只支持 .epub 文件", 415, "invalid_extension"
+        )
     digest = hashlib.sha256(content).hexdigest()
     existing = await get_book_by_hash(digest)
     if existing:
@@ -267,6 +324,17 @@ async def register_uploaded_book(
             ),
         )
         await db.commit()
+    except aiosqlite.IntegrityError:
+        # A concurrent upload of the same content won the race.
+        _remove_upload_dir(book_dir)
+        existing = await get_book_by_hash(digest)
+        if not existing:
+            raise
+        return existing
+    except Exception:
+        # Do not leave an orphaned upload directory if the insert failed.
+        _remove_upload_dir(book_dir)
+        raise
     finally:
         await db.close()
     await enqueue_index(book_id)
@@ -666,7 +734,7 @@ async def retrieve_sources(
             (book_id,),
         )
         fts_rank = []
-        terms = re.findall(r"[\w\u4e00-\u9fff]{2,}", question.lower())[:8]
+        terms = _fts_query_terms(question)
         if terms:
             match_query = " OR ".join(f'"{term}"' for term in terms)
             try:

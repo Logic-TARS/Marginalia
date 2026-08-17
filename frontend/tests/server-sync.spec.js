@@ -100,7 +100,15 @@ test.describe('server library sync', () => {
     await pageA.goto('/index.html');
     await pageA.setInputFiles('#file-input', FIXTURE);
     await expect(pageA.locator('#toolbar-book-title')).toContainText('Multichapter');
-    await pageA.click('#btn-reader-tools');
+    // Desktop reader chrome starts hidden; reveal it before using the toolbar.
+    if (!(await pageA.locator('#btn-reader-tools').isVisible())) {
+      const revealA = pageA.locator('#btn-reveal-reader-chrome');
+      await revealA.waitFor({ state: 'visible', timeout: 10_000 });
+      await revealA.dispatchEvent('click');
+    }
+    if (await pageA.locator('#reader-tool-panel').isHidden()) {
+      await pageA.click('#btn-reader-tools');
+    }
     await pageA.click('#btn-add-bookmark');
     await expect(pageA.locator('#bookmarks-count')).toHaveText('1');
     await pageA.waitForFunction(() => {

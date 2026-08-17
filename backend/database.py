@@ -70,6 +70,7 @@ async def init_db() -> None:
             )
         """)
         await db.commit()
+        await _init_highlights_fts(db)
 
 
 async def _ensure_column(db: aiosqlite.Connection, name: str, definition: str) -> None:
@@ -77,6 +78,65 @@ async def _ensure_column(db: aiosqlite.Connection, name: str, definition: str) -
     columns = {row[1] for row in rows}
     if name not in columns:
         await db.execute(f"ALTER TABLE highlights ADD COLUMN {name} {definition}")
+
+
+_FTS_TOKENIZER = "unicode61"
+
+
+async def _init_highlights_fts(db: aiosqlite.Connection) -> None:
+    """Create the FTS5 full-text index over highlights and keep it in sync."""
+    global _FTS_TOKENIZER
+    try:
+        await db.execute(
+            "CREATE VIRTUAL TABLE temp._fts_probe USING fts5(x, tokenize='trigram')"
+        )
+        await db.execute("DROP TABLE temp._fts_probe")
+        _FTS_TOKENIZER = "trigram"
+    except aiosqlite.Error:
+        _FTS_TOKENIZER = "unicode61"
+
+    await db.execute(f"""
+        CREATE VIRTUAL TABLE IF NOT EXISTS highlights_fts USING fts5(
+            book_title, book_author, chapter, highlight_text, note, tags,
+            content='highlights', content_rowid='rowid',
+            tokenize='{_FTS_TOKENIZER}'
+        )
+    """)
+    await db.execute("""
+        CREATE TRIGGER IF NOT EXISTS highlights_fts_ai AFTER INSERT ON highlights BEGIN
+            INSERT INTO highlights_fts(rowid, book_title, book_author, chapter, highlight_text, note, tags)
+            VALUES (new.rowid, new.book_title, new.book_author, new.chapter, new.highlight_text, new.note, new.tags);
+        END
+    """)
+    await db.execute("""
+        CREATE TRIGGER IF NOT EXISTS highlights_fts_ad AFTER DELETE ON highlights BEGIN
+            INSERT INTO highlights_fts(highlights_fts, rowid, book_title, book_author, chapter, highlight_text, note, tags)
+            VALUES ('delete', old.rowid, old.book_title, old.book_author, old.chapter, old.highlight_text, old.note, old.tags);
+        END
+    """)
+    await db.execute("""
+        CREATE TRIGGER IF NOT EXISTS highlights_fts_au AFTER UPDATE ON highlights BEGIN
+            INSERT INTO highlights_fts(highlights_fts, rowid, book_title, book_author, chapter, highlight_text, note, tags)
+            VALUES ('delete', old.rowid, old.book_title, old.book_author, old.chapter, old.highlight_text, old.note, old.tags);
+            INSERT INTO highlights_fts(rowid, book_title, book_author, chapter, highlight_text, note, tags)
+            VALUES (new.rowid, new.book_title, new.book_author, new.chapter, new.highlight_text, new.note, new.tags);
+        END
+    """)
+
+    # Commit the schema first: an FTS5 'rebuild' inside the same
+    # transaction as CREATE VIRTUAL TABLE does not populate the index.
+    await db.commit()
+
+    # Backfill when the index is missing but there is content. COUNT(*)
+    # on an external-content FTS table is unreliable, so check the index
+    # shadow table directly.
+    rows = await db.execute_fetchall(
+        "SELECT (SELECT COUNT(*) FROM highlights) > 0"
+        " AND NOT EXISTS (SELECT 1 FROM highlights_fts_idx)"
+    )
+    if rows and rows[0][0]:
+        await db.execute("INSERT INTO highlights_fts(highlights_fts) VALUES ('rebuild')")
+        await db.commit()
 
 
 async def save_highlights(highlights: list[dict]) -> list[str]:
@@ -241,19 +301,78 @@ async def get_materials(
             conditions.append("note IS NOT NULL AND note != ''")
         elif has_note is False:
             conditions.append("(note IS NULL OR note = '')")
+        if tag:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM json_each(highlights.tags) je WHERE je.value LIKE ?)"
+            )
+            params.append(f"%{tag}%")
 
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
         query = f"SELECT * FROM highlights{where} ORDER BY received_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
         rows = await db.execute_fetchall(query, params)
-        results = [_row_to_dict(r) for r in rows]
+        return [_row_to_dict(r) for r in rows]
 
-        # tag filter requires Python-side check (JSON array), but dataset is now much smaller
-        if tag:
-            results = [h for h in results if tag in h.get("tags", [])]
 
-        return results
+async def search_highlights(
+    query: str,
+    book_title: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    """Full-text search over highlight text, notes, tags and book metadata.
+
+    Uses the FTS5 trigram index when possible (queries of 3+ characters);
+    shorter queries or environments without trigram support fall back to
+    LIKE matching across the same fields.
+    """
+    query = (query or "").strip()
+    if len(query) < 2:
+        return []
+
+    use_fts = _FTS_TOKENIZER == "trigram" and len(query) >= 3
+
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        if use_fts:
+            match = '"' + query.replace('"', '""') + '"'
+            conditions = ["highlights_fts MATCH ?"]
+            params: list[Any] = [match]
+            if book_title:
+                conditions.append("h.book_title LIKE ?")
+                params.append(f"%{book_title}%")
+            where = " AND ".join(conditions)
+            rows = await db.execute_fetchall(
+                f"""
+                SELECT h.*,
+                       snippet(highlights_fts, 3, '<mark>', '</mark>', '...', 24) AS highlight_snippet,
+                       snippet(highlights_fts, 4, '<mark>', '</mark>', '...', 24) AS note_snippet
+                FROM highlights_fts
+                JOIN highlights h ON h.rowid = highlights_fts.rowid
+                WHERE {where}
+                ORDER BY bm25(highlights_fts)
+                LIMIT ? OFFSET ?
+                """,
+                [*params, limit, offset],
+            )
+            return [_row_to_dict(r) for r in rows]
+
+        like = f"%{query}%"
+        conditions = [
+            "(book_title LIKE ? OR book_author LIKE ? OR chapter LIKE ?"
+            " OR highlight_text LIKE ? OR note LIKE ? OR tags LIKE ?)"
+        ]
+        params = [like] * 6
+        if book_title:
+            conditions.append("book_title LIKE ?")
+            params.append(f"%{book_title}%")
+        where = " AND ".join(conditions)
+        rows = await db.execute_fetchall(
+            f"SELECT * FROM highlights WHERE {where} ORDER BY received_at DESC LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        )
+        return [_row_to_dict(r) for r in rows]
 
 
 async def get_highlights_by_ids(ids: list[str]) -> list[dict]:

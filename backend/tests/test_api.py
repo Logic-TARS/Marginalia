@@ -90,9 +90,26 @@ class TestHealth:
         assert data["status"] == "ok"
         assert data["service"] == "marginalia"
 
-    def test_untrusted_host_is_rejected(self, client):
-        resp = client.get("/health", headers={"host": "attacker.example"})
-        assert resp.status_code == 400
+    def test_untrusted_host_is_rejected(self):
+        # Isolate from the developer's real .env ALLOWED_HOSTS: the value was
+        # baked into the middleware kwargs at import time, so patch them and
+        # force the middleware stack to rebuild.
+        from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+        saved = []
+        for mw in app.user_middleware:
+            if mw.cls is TrustedHostMiddleware:
+                saved.append(mw.kwargs["allowed_hosts"])
+                mw.kwargs["allowed_hosts"] = ["localhost", "127.0.0.1", "testserver"]
+        app.middleware_stack = None
+        try:
+            resp = TestClient(app).get("/health", headers={"host": "attacker.example"})
+            assert resp.status_code == 400
+        finally:
+            for mw in app.user_middleware:
+                if mw.cls is TrustedHostMiddleware:
+                    mw.kwargs["allowed_hosts"] = saved.pop(0)
+            app.middleware_stack = None
 
     def test_api_responses_are_not_cacheable(self, client):
         resp = client.get("/api/highlights")
@@ -473,6 +490,66 @@ class TestServerLibraryAPI:
         served = client.get(f"/api/books/{book['id']}/file")
         assert served.status_code == 200
         assert served.content == self._epub_bytes()
+
+    def test_upload_accepts_uppercase_extension(self, client):
+        async def no_index(_book_id):
+            return None
+
+        with patch("library.ensure_library_knowledge", no_index):
+            resp = client.post(
+                "/api/books/upload",
+                files={
+                    "file": (
+                        "BOOK.EPUB",
+                        self._epub_bytes(),
+                        "application/epub+zip",
+                    )
+                },
+            )
+        assert resp.status_code == 202
+
+    def test_upload_rejects_wrong_extension(self, client):
+        library_resp = client.post(
+            "/api/books/upload",
+            files={"file": ("book.zip", self._epub_bytes(), "application/epub+zip")},
+        )
+        knowledge_resp = client.post(
+            "/api/knowledge/books/upload",
+            files={"file": ("book.zip", self._epub_bytes(), "application/epub+zip")},
+        )
+        assert library_resp.status_code == 415
+        assert knowledge_resp.status_code == 415
+
+    def test_upload_rejects_non_zip(self, client):
+        resp = client.post(
+            "/api/books/upload",
+            files={"file": ("fake.epub", b"definitely not a zip", "application/epub+zip")},
+        )
+        assert resp.status_code == 415
+
+    def test_upload_rejects_zip_without_container(self, client):
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as archive:
+            archive.writestr("hello.txt", "hi")
+        resp = client.post(
+            "/api/books/upload",
+            files={"file": ("fake.epub", buf.getvalue(), "application/epub+zip")},
+        )
+        assert resp.status_code == 415
+
+    def test_failed_upload_leaves_no_files_behind(self, client):
+        import books_api as books_api_module
+
+        before = set(Path(books_api_module.BOOKS_DIR).glob("*.epub"))
+        client.post(
+            "/api/books/upload",
+            files={"file": ("fake.epub", b"not a zip", "application/epub+zip")},
+        )
+        after = set(Path(books_api_module.BOOKS_DIR).glob("*.epub"))
+        assert before == after
 
     def test_cross_device_state_sync_is_idempotent(self, client):
         async def no_index(_book_id):

@@ -155,6 +155,117 @@ def test_stream_persists_answer_and_valid_citations(knowledge_db, monkeypatch):
     assert messages[-1]["citations"][0]["source_id"] == "chunk-1"
 
 
+def test_chinese_fts_recall(knowledge_db):
+    """FTS recall must work for Chinese text (trigram tokenizer)."""
+    if knowledge._FTS_TOKENIZER != "trigram":
+        pytest.skip("trigram tokenizer unavailable")
+
+    text = "斯多葛派的预演法是在清晨提醒自己今天可能遇到的困难。"
+
+    async def prepare():
+        db = await knowledge._connect()
+        try:
+            now = knowledge._now()
+            await db.execute(
+                """
+                INSERT INTO qa_books
+                    (id, content_hash, title, original_filename, source_path,
+                     source_kind, status, created_at, updated_at)
+                VALUES ('book-zh','hash-zh','书','book.epub','book.epub',
+                        'server','ready',?,?)
+                """,
+                (now, now),
+            )
+            await db.execute(
+                """
+                INSERT INTO qa_chunks
+                    (id, book_id, run_id, ordinal, text, anchor_text, embedding)
+                VALUES ('chunk-zh','book-zh','run-1',0,?,?,?)
+                """,
+                (text, text[:8], knowledge._pack_vector([1.0, 0.0])),
+            )
+            await db.execute(
+                "INSERT INTO qa_chunks_fts(chunk_id, book_id, text) VALUES ('chunk-zh','book-zh',?)",
+                (text,),
+            )
+            await db.commit()
+        finally:
+            await db.close()
+
+    asyncio.run(prepare())
+
+    terms = knowledge._fts_query_terms("什么是预演法？")
+    assert terms, "expected trigram windows for the CJK question"
+
+    async def query():
+        db = await knowledge._connect()
+        try:
+            match = " OR ".join(f'"{term}"' for term in terms)
+            return await db.execute_fetchall(
+                "SELECT chunk_id FROM qa_chunks_fts"
+                " WHERE qa_chunks_fts MATCH ? AND book_id='book-zh'",
+                (match,),
+            )
+        finally:
+            await db.close()
+
+    rows = asyncio.run(query())
+    assert [row["chunk_id"] for row in rows] == ["chunk-zh"]
+
+
+def test_fts_migrates_from_unicode61(knowledge_db):
+    """A legacy unicode61 FTS table is rebuilt with the probed tokenizer."""
+    if knowledge._FTS_TOKENIZER != "trigram":
+        pytest.skip("trigram tokenizer unavailable")
+
+    async def legacy():
+        db = await knowledge._connect()
+        try:
+            await db.execute("DROP TABLE qa_chunks_fts")
+            await db.execute(
+                "CREATE VIRTUAL TABLE qa_chunks_fts USING fts5("
+                "chunk_id UNINDEXED, book_id UNINDEXED, text, tokenize='unicode61')"
+            )
+            await db.execute(
+                """
+                INSERT INTO qa_books
+                    (id, content_hash, title, original_filename, source_path,
+                     source_kind, status, created_at, updated_at)
+                VALUES ('b1','h1','书','book.epub','book.epub','server','ready',?,?)
+                """,
+                (knowledge._now(), knowledge._now()),
+            )
+            await db.execute(
+                """
+                INSERT INTO qa_chunks
+                    (id, book_id, run_id, ordinal, text, anchor_text, embedding)
+                VALUES ('c1','b1','r1',0,'预演法的实践','预演法',?)
+                """,
+                (knowledge._pack_vector([1.0, 0.0]),),
+            )
+            await db.commit()
+        finally:
+            await db.close()
+
+    asyncio.run(legacy())
+    asyncio.run(knowledge.init_knowledge_db())
+
+    async def check():
+        db = await knowledge._connect()
+        try:
+            sql_rows = await db.execute_fetchall(
+                "SELECT sql FROM sqlite_master WHERE name='qa_chunks_fts'"
+            )
+            count_rows = await db.execute_fetchall("SELECT COUNT(*) c FROM qa_chunks_fts")
+            return sql_rows[0]["sql"], count_rows[0]["c"]
+        finally:
+            await db.close()
+
+    sql, count = asyncio.run(check())
+    assert "tokenize='trigram'" in sql
+    assert count == 1, "existing chunks must be backfilled after migration"
+
+
 def test_rejects_invalid_epub_without_deleting_parent(knowledge_db, monkeypatch):
     async def no_queue(_book_id):
         return None

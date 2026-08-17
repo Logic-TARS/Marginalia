@@ -90,21 +90,21 @@ async def init_library_db() -> None:
 
 async def reconcile_legacy_books() -> None:
     """Register EPUBs that were manually placed in backend/data/books."""
-    for path in sorted(BOOKS_DIR.glob("*.epub")):
-        db = await _connect()
-        try:
+    db = await _connect()
+    try:
+        for path in sorted(BOOKS_DIR.glob("*.epub")):
             row = await db.execute_fetchall(
                 "SELECT id FROM library_books WHERE storage_filename = ?", (path.name,)
             )
-        finally:
-            await db.close()
-        if row:
-            continue
-        try:
-            await _register_existing_file(path, path.name)
-        except Exception:
-            # One bad legacy file must not prevent the service from starting.
-            continue
+            if row:
+                continue
+            try:
+                await _register_existing_file(path, path.name)
+            except Exception:
+                # One bad legacy file must not prevent the service from starting.
+                continue
+    finally:
+        await db.close()
 
 
 async def _register_existing_file(path: Path, original_filename: str) -> dict:
@@ -157,7 +157,7 @@ async def upload_library_book(
             detail=f"EPUB 大小必须在 1 字节到 {settings.max_epub_upload_mb}MB 之间",
         )
     if not filename.lower().endswith(".epub"):
-        raise HTTPException(status_code=415, detail="Only .epub files are supported")
+        raise HTTPException(status_code=415, detail="只支持 .epub 文件")
 
     content_hash = hashlib.sha256(content).hexdigest()
     existing = await get_library_book_by_hash(content_hash)
@@ -216,6 +216,10 @@ async def upload_library_book(
             raise
         await ensure_library_knowledge(existing["id"])
         return (await get_library_book(existing["id"]) or existing), False
+    except Exception:
+        # Do not leave an untracked EPUB on disk if the insert failed.
+        final_path.unlink(missing_ok=True)
+        raise
     finally:
         await db.close()
 

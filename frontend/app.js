@@ -13,6 +13,8 @@
   const READER_SYNC_TIMEOUT_MS = 3000;
   const EPUB_DOWNLOAD_TIMEOUT_MS = 60000;
   const EPUB_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+  // Keep in sync with the backend default MAX_EPUB_UPLOAD_MB (config.py).
+  const EPUB_MAX_UPLOAD_MB = 90;
   const MOBILE_LAYOUT_QUERY = '(max-width: 900px)';
   const READER_CHROME_INITIAL_HIDE_MS = 2400;
   const READER_CHROME_AUTO_HIDE_MS = 3600;
@@ -83,6 +85,8 @@
   const FONT_SIZE_MAX = 200;
   let searchResultsList = [];
   let searchHighlightKeys = [];
+  let searchToken = 0;            // bumped to cancel an in-flight book search
+  let searchDebounceTimer = null;
   let aiMessages = [];
   let aiConversations = [];
   let currentAiConversationId = null;
@@ -1431,7 +1435,19 @@
       .toLowerCase();
   }
 
+  async function computeContentHash(arrayBuffer) {
+    // crypto.subtle is unavailable on plain-HTTP LAN origins; skip there.
+    if (!crypto.subtle || !arrayBuffer) return '';
+    try {
+      const digest = await crypto.subtle.digest('SHA-256', arrayBuffer);
+      return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+    } catch (_err) {
+      return '';
+    }
+  }
+
   function getBookDedupeKey(book) {
+    if (book.content_hash) return 'hash:' + book.content_hash;
     if (book.server_book_id || book.source === 'server' || book._source === 'server') {
       return 'server:' + (book.server_book_id || book.id || normalizeBookText(book.filename));
     }
@@ -1526,6 +1542,7 @@
     if (xhr.status === 400) return '服务器拒绝当前访问地址，请检查 ALLOWED_HOSTS 是否包含局域网 IP';
     if (xhr.status === 413) return 'EPUB 文件过大，请调高 MAX_EPUB_UPLOAD_MB 后重启服务器';
     if (xhr.status === 415) return '只支持有效的 .epub 文件';
+    if (xhr.status >= 500) return `服务器暂时不可用（状态 ${xhr.status}），稍后可重试上传`;
     return `服务器响应 ${xhr.status}`;
   }
 
@@ -1652,10 +1669,15 @@
   async function migrateLocalBooksToServer() {
     if (!navigator.onLine) return;
     const books = await dbGetAll('books');
-    for (const book of books) {
-      if (!shouldAutoUploadLocalBook(book)) continue;
-      await uploadLocalBookInBackground(book, book.file_blob, { announce: false });
-    }
+    const queue = books.filter(shouldAutoUploadLocalBook);
+    // Two uploads at a time: faster library recovery without saturating the LAN.
+    const workers = Array.from({ length: Math.min(2, queue.length) }, async () => {
+      while (queue.length) {
+        const book = queue.shift();
+        await uploadLocalBookInBackground(book, book.file_blob, { announce: false });
+      }
+    });
+    await Promise.all(workers);
   }
 
   async function uploadLocalBookInBackground(book, arrayBuffer, { announce = true } = {}) {
@@ -1759,8 +1781,17 @@
   }
 
   function handleFileImport(file) {
-    if (!file || !file.name.endsWith('.epub')) {
+    if (!file || !file.name.toLowerCase().endsWith('.epub')) {
       showToast('请选择 .epub 文件', 'error');
+      return;
+    }
+    if (file.size > EPUB_MAX_UPLOAD_MB * 1024 * 1024) {
+      showToast(`文件超过 ${EPUB_MAX_UPLOAD_MB}MB 上限，无法导入`, 'error');
+      setOperationStatus({
+        message: `${file.name} 超过大小上限`,
+        detail: `当前上限 ${EPUB_MAX_UPLOAD_MB}MB，可调高服务器 MAX_EPUB_UPLOAD_MB 后重试`,
+        tone: 'error',
+      });
       return;
     }
 
@@ -1793,8 +1824,12 @@
         };
         const candidateMetadataKey = getBookMetadataKey(candidate);
         const importedFilename = normalizeBookText(file.name);
+        const contentHash = await computeContentHash(e.target.result);
         const existingBooks = await dbGetAll('books');
         const existingBook = existingBooks.find(book => (
+          (contentHash && (
+            book.content_hash === contentHash || book.cached_content_hash === contentHash
+          )) ||
           normalizeBookText(book.original_filename || book.filename) === importedFilename ||
           getBookMetadataKey(book) === candidateMetadataKey
         ));
@@ -1808,6 +1843,7 @@
         };
         localRecord.file_blob = e.target.result;
         localRecord.original_filename = file.name;
+        if (contentHash) localRecord.content_hash = contentHash;
         if (existingBook) {
           localRecord.transfer_preserved_progress = existingBook.progress_percent || 0;
           localRecord.transfer_preserved_cfi = existingBook.last_cfi || '';
@@ -1818,7 +1854,14 @@
         localRecord.transfer_error = '';
         localRecord.knowledge_status = localRecord.knowledge_status || 'unregistered';
         localRecord.knowledge_error = '';
-        await dbPut('books', localRecord);
+        try {
+          await dbPut('books', localRecord);
+        } catch (err) {
+          if (!isStorageQuotaError(err)) throw err;
+          // Quota exhausted: keep the import readable, just skip the shelf copy.
+          console.warn('Unable to persist imported EPUB:', err);
+          showToast('浏览器存储空间不足，本书不会保存到书架', 'warning');
+        }
         await renderLibrary();
         setOperationStatus({
           bookId: localRecord.id,
@@ -1852,26 +1895,29 @@
   function extractBookMeta(blob) {
     return new Promise((resolve) => {
       const meta = { title: '', author: '' };
+      let settled = false;
+      let url = null;
+      let book = null;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (url) URL.revokeObjectURL(url);
+        if (book && typeof book.destroy === 'function') book.destroy();
+        resolve(meta);
+      };
       try {
-        const url = URL.createObjectURL(blob);
-        const book = ePub(url, { openAs: 'epub' });
+        url = URL.createObjectURL(blob);
+        book = ePub(url, { openAs: 'epub' });
         book.loaded.metadata.then((md) => {
           meta.title = md.title || '';
           meta.author = md.creator || '';
-          URL.revokeObjectURL(url);
-          resolve(meta);
-        }).catch(() => {
-          URL.revokeObjectURL(url);
-          resolve(meta);
-        });
+          finish();
+        }).catch(finish);
 
         // Timeout: if metadata doesn't load within 5s, resolve with empty
-        setTimeout(() => {
-          URL.revokeObjectURL(url);
-          resolve(meta);
-        }, 5000);
+        setTimeout(finish, 5000);
       } catch (e) {
-        resolve(meta);
+        finish();
       }
     });
   }
@@ -1921,14 +1967,7 @@
       setAiIndexState('uploading');
     }
     try {
-      let resp;
-      if (book.filename && !book.file_blob) {
-        resp = await fetch(API_BASE + '/api/knowledge/books/from-server', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: book.filename }),
-        });
-      } else {
+      const uploadBytes = () => {
         const form = new FormData();
         form.append(
           'file',
@@ -1937,10 +1976,27 @@
         );
         form.append('title', book.book_title || '');
         form.append('author', book.book_author || '');
-        resp = await fetch(API_BASE + '/api/knowledge/books/upload', {
+        return fetch(API_BASE + '/api/knowledge/books/upload', {
           method: 'POST',
           body: form,
         });
+      };
+
+      let resp;
+      if (book.filename) {
+        // The EPUB already lives on the server; register it for AI without
+        // re-uploading the bytes. Fall back to a full upload if the server
+        // lost the file but this device still has it.
+        resp = await fetch(API_BASE + '/api/knowledge/books/from-server', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: book.filename }),
+        });
+        if (resp.status === 404 && book.file_blob) {
+          resp = await uploadBytes();
+        }
+      } else {
+        resp = await uploadBytes();
       }
       if (!resp.ok) {
         const error = await resp.json().catch(() => ({}));
@@ -4142,9 +4198,18 @@
     setSearchPanelOpen(dom.searchPanel.hidden);
   }
 
+  const SEARCH_MAX_RESULTS = 100;
+  const SEARCH_EXCERPT_RADIUS = 40;
+
   async function performSearch(query) {
     if (!query || query.length < 2) {
       dom.searchResults.innerHTML = '<div class="empty-search">至少输入 2 个字符</div>';
+      dom.searchCount.textContent = '0 条';
+      return;
+    }
+
+    if (!currentBook || !currentBook.spine) {
+      dom.searchResults.innerHTML = '<div class="empty-search">请先打开一本书</div>';
       dom.searchCount.textContent = '0 条';
       return;
     }
@@ -4155,7 +4220,7 @@
     try {
       clearSearchHighlights();
 
-      const results = await currentBook.find(query);
+      const results = await searchBookContent(query);
       searchResultsList = results || [];
 
       if (searchResultsList.length === 0) {
@@ -4168,28 +4233,123 @@
       renderSearchResults(query);
       highlightSearchMatches(query);
     } catch (err) {
+      if (err && err.name === 'SearchCancelledError') return;
       console.error('Search failed:', err);
       dom.searchResults.innerHTML = '<div class="empty-search">搜索失败，请重试</div>';
       dom.searchCount.textContent = '0 条';
     }
   }
 
+  function cancelBookSearch() {
+    searchToken += 1;
+  }
+
+  function throwIfSearchCancelled(token) {
+    if (token !== searchToken) {
+      const err = new Error('Search cancelled');
+      err.name = 'SearchCancelledError';
+      throw err;
+    }
+  }
+
+  // Walk every spine section and collect substring matches (epub.js v0.3
+  // only exposes find/search on Section, not on Book).
+  async function searchBookContent(query) {
+    const token = ++searchToken;
+    const needle = query.toLowerCase();
+    const results = [];
+    const spineItems = (currentBook.spine.spineItems || []).filter(s => s && s.linear !== 'no');
+    const total = spineItems.length;
+
+    for (let i = 0; i < spineItems.length; i++) {
+      throwIfSearchCancelled(token);
+      dom.searchCount.textContent = `搜索中… ${i + 1}/${total}`;
+
+      const section = spineItems[i];
+      let doc = null;
+      try {
+        // section.load() resolves to the root element; the parsed
+        // Document lives on section.document.
+        const loaded = await section.load(currentBook.load.bind(currentBook));
+        doc = section.document || (loaded && loaded.ownerDocument) || null;
+      } catch (e) {
+        continue; // skip unreadable sections
+      }
+      throwIfSearchCancelled(token);
+
+      try {
+        if (doc && doc.body) {
+          collectSectionMatches(doc, section, needle, query, results);
+        }
+      } finally {
+        if (section.unload) section.unload();
+      }
+      if (results.length >= SEARCH_MAX_RESULTS) break;
+
+      // Yield to keep the UI responsive on large books.
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    return results;
+  }
+
+  function collectSectionMatches(doc, section, needle, query, results) {
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (!parent) return NodeFilter.FILTER_REJECT;
+        const tag = parent.tagName;
+        if (tag === 'SCRIPT' || tag === 'STYLE') return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+
+    let node;
+    while ((node = walker.nextNode()) && results.length < SEARCH_MAX_RESULTS) {
+      const text = node.textContent;
+      const lower = text.toLowerCase();
+      let from = 0;
+      let index = lower.indexOf(needle, from);
+      while (index !== -1 && results.length < SEARCH_MAX_RESULTS) {
+        const cfi = cfiForTextMatch(doc, section, node, index, query.length);
+        const start = Math.max(0, index - SEARCH_EXCERPT_RADIUS);
+        const end = Math.min(text.length, index + query.length + SEARCH_EXCERPT_RADIUS);
+        const excerpt = (start > 0 ? '…' : '') + text.slice(start, end).trim() + (end < text.length ? '…' : '');
+        results.push({ cfi, excerpt });
+        from = index + query.length;
+        index = lower.indexOf(needle, from);
+      }
+    }
+  }
+
+  function cfiForTextMatch(doc, section, textNode, index, length) {
+    try {
+      const range = doc.createRange();
+      range.setStart(textNode, index);
+      range.setEnd(textNode, Math.min(textNode.textContent.length, index + length));
+      return section.cfiFromRange(range);
+    } catch (e) {
+      return section.cfiBase ? `epubcfi(${section.cfiBase})` : '';
+    }
+  }
+
   function renderSearchResults(query) {
     dom.searchResults.innerHTML = '';
-    const maxResults = 100;
+    const maxResults = SEARCH_MAX_RESULTS;
     const displayResults = searchResultsList.slice(0, maxResults);
+    const queryRegex = new RegExp(escapeRegex(query), 'gi');
 
     for (const result of displayResults) {
       const item = document.createElement('div');
       item.className = 'search-result-item';
       const excerpt = (result.excerpt || '').replace(/\n/g, ' ').trim();
+      const highlighted = escapeHTML(excerpt).replace(queryRegex, m => `<mark>${m}</mark>`);
       item.innerHTML = `
-        <div class="search-result-excerpt">${escapeHTML(excerpt)}</div>
+        <div class="search-result-excerpt">${highlighted}</div>
         <div class="search-result-meta">点击跳转</div>
       `;
       item.addEventListener('click', () => {
         if (blockManualNavigationDuringTts()) return;
-        currentRendition.display(result.cfi);
+        if (result.cfi) currentRendition.display(result.cfi);
         if (isMobileLayout()) {
           setSearchPanelOpen(false, { clearOnClose: false });
         }
@@ -4197,10 +4357,10 @@
       dom.searchResults.appendChild(item);
     }
 
-    if (searchResultsList.length > maxResults) {
+    if (searchResultsList.length >= maxResults) {
       const more = document.createElement('div');
       more.className = 'search-result-more';
-      more.textContent = `仅显示前 ${maxResults} 条，共 ${searchResultsList.length} 条`;
+      more.textContent = `仅显示前 ${maxResults} 条匹配，请缩小关键词范围`;
       dom.searchResults.appendChild(more);
     }
   }
@@ -4273,6 +4433,7 @@
   }
 
   function clearSearchResults() {
+    cancelBookSearch();
     searchResultsList = [];
     clearSearchHighlights();
     dom.searchResults.innerHTML = '<div class="empty-search">输入关键词搜索本书内容</div>';
@@ -5699,14 +5860,19 @@
   }
 
   async function getFilteredLocalMaterials() {
-    const bookFilter = dom.materialBookFilter.value.trim();
-    const tagFilter = dom.materialTagFilter.value.trim();
+    const keyword = dom.materialBookFilter.value.trim().toLowerCase();
+    const tagFilter = dom.materialTagFilter.value.trim().toLowerCase();
     let materials = await dbGetAll('highlights');
-    if (bookFilter) {
-      materials = materials.filter(h => (h.book_title || '').includes(bookFilter));
+    if (keyword) {
+      materials = materials.filter(h =>
+        (h.book_title || '').toLowerCase().includes(keyword) ||
+        (h.highlight_text || '').toLowerCase().includes(keyword) ||
+        (h.note || '').toLowerCase().includes(keyword) ||
+        (h.tags || []).some(t => t.toLowerCase().includes(keyword))
+      );
     }
     if (tagFilter) {
-      materials = materials.filter(h => (h.tags || []).some(t => t.includes(tagFilter)));
+      materials = materials.filter(h => (h.tags || []).some(t => t.toLowerCase().includes(tagFilter)));
     }
     materials.sort((a, b) => {
       const bookCompare = (a.book_title || '').localeCompare(b.book_title || '', 'zh-CN');
@@ -6236,6 +6402,17 @@
         if (query) performSearch(query);
       }
     });
+    dom.searchInput.addEventListener('input', () => {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        const query = dom.searchInput.value.trim();
+        if (query.length >= 2) {
+          performSearch(query);
+        } else if (query.length === 0) {
+          clearSearchResults();
+        }
+      }, 300);
+    });
     dom.btnSearchClose.addEventListener('click', toggleSearchPanel);
     dom.btnCloseSearchPanel.addEventListener('click', () => setSearchPanelOpen(false));
 
@@ -6244,8 +6421,13 @@
 
     // Creation workspace
     dom.btnRefreshMaterials.addEventListener('click', renderCreationWorkspace);
-    dom.materialBookFilter.addEventListener('input', renderMaterials);
-    dom.materialTagFilter.addEventListener('input', renderMaterials);
+    let materialsFilterTimer = null;
+    const debouncedRenderMaterials = () => {
+      clearTimeout(materialsFilterTimer);
+      materialsFilterTimer = setTimeout(renderMaterials, 200);
+    };
+    dom.materialBookFilter.addEventListener('input', debouncedRenderMaterials);
+    dom.materialTagFilter.addEventListener('input', debouncedRenderMaterials);
     dom.btnSaveReflection.addEventListener('click', saveCurrentReflection);
     dom.btnDeleteReflection.addEventListener('click', deleteCurrentReflection);
     dom.btnGenerateVideo.addEventListener('click', () => generateDraft('video'));

@@ -39,6 +39,7 @@ Marginalia is an end-to-end local reading workflow: EPUB highlights -> backend n
   - `POST /api/highlights` — receive highlights from reader
   - `GET /api/highlights` — list highlights
   - `GET /api/materials` — filter creation materials
+  - `GET /api/search` — full-text search over highlight text, notes, and tags (FTS5)
   - `POST /api/books/ask` — answer questions using local reading context
   - `POST /api/knowledge/books/upload` — upload and queue a local EPUB index
   - `GET /api/knowledge/books/{id}` — inspect persisted index state

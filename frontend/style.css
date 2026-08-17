@@ -1434,6 +1434,12 @@ body.reader-active .operation-status {
   color: var(--ink-muted);
 }
 
+.search-result-excerpt mark {
+  background: rgba(246, 216, 111, 0.7);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 .search-result-more {
   text-align: center;
   padding: 12px;

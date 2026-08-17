@@ -40,6 +40,12 @@ test.describe('home page navigation', () => {
     await expect(page.locator('#reader-view')).toHaveClass(/active/, { timeout: 15_000 });
     await expect(page.locator('#toolbar-book-title')).toContainText(/multichapter/i, { timeout: 15_000 });
     await expect(page.locator('.home-nav')).toBeHidden();
+    // Desktop reader chrome starts hidden; reveal it before asserting.
+    if (!(await page.locator('#btn-back').isVisible())) {
+      const reveal = page.locator('#btn-reveal-reader-chrome');
+      await reveal.waitFor({ state: 'visible', timeout: 10_000 });
+      await reveal.dispatchEvent('click');
+    }
     await expect(page.locator('#btn-back')).toBeVisible();
     await expect(page.locator('#btn-library-create')).toBeHidden();
     await expect(page.locator('#btn-creation-back')).toBeHidden();

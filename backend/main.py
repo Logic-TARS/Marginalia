@@ -22,6 +22,7 @@ from database import (
     upsert_highlights,
     get_all_highlights,
     get_materials,
+    search_highlights,
     get_highlights_by_ids,
     get_highlight,
     update_highlight,
@@ -184,6 +185,20 @@ async def list_materials(
     return {"materials": materials, "count": len(materials)}
 
 
+@app.get("/api/search")
+async def search_endpoint(
+    q: str,
+    book_title: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Full-text search across highlight text, notes, tags and book metadata."""
+    results = await search_highlights(
+        query=q, book_title=book_title, limit=limit, offset=offset
+    )
+    return {"results": results, "count": len(results)}
+
+
 # ── Single highlight CRUD ───────────────────────────────
 @app.get("/api/highlights/{highlight_id}")
 async def get_highlight_endpoint(highlight_id: str):
@@ -266,11 +281,9 @@ async def upload_knowledge_book(
 ):
     from knowledge import KnowledgeError, public_book, register_uploaded_book
 
-    if not file.filename or not file.filename.lower().endswith(".epub"):
-        raise HTTPException(status_code=415, detail="Only .epub files are supported")
     content = await file.read(settings.max_epub_upload_mb * 1024 * 1024 + 1)
     try:
-        return public_book(await register_uploaded_book(content, file.filename, title, author))
+        return public_book(await register_uploaded_book(content, file.filename or "", title, author))
     except KnowledgeError as e:
         raise HTTPException(status_code=e.status_code, detail={"code": e.code, "message": str(e)})
 
