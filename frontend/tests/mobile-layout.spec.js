@@ -317,6 +317,43 @@ async function selectIframeText(page) {
   });
 }
 
+async function selectMultilineIframeText(page) {
+  return page.locator('#epub-container').evaluate((host) => {
+    const iframe = Array.from(host.querySelectorAll('iframe')).find(item => item.contentDocument?.body);
+    if (!iframe) throw new Error('No active EPUB iframe found');
+    const doc = iframe.contentDocument;
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node && node.nodeValue.trim().length < 120) node = walker.nextNode();
+    if (!node) throw new Error('No long selectable fixture text found');
+
+    const leadingWhitespace = node.nodeValue.search(/\S/);
+    const start = Math.max(0, leadingWhitespace);
+    const end = Math.min(node.nodeValue.length, start + 120);
+    const range = doc.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, end);
+    const selection = doc.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    doc.dispatchEvent(new Event('selectionchange'));
+
+    const frameRect = iframe.getBoundingClientRect();
+    const rects = Array.from(range.getClientRects()).filter(item => item.width || item.height);
+    if (rects.length < 2) throw new Error('Fixture selection did not span multiple lines');
+    const bounds = rects.reduce((acc, item) => ({
+      top: Math.min(acc.top, item.top),
+      bottom: Math.max(acc.bottom, item.bottom),
+    }), { top: rects[0].top, bottom: rects[0].bottom });
+
+    return {
+      text: selection.toString().trim(),
+      selectionTop: bounds.top + frameRect.top,
+      selectionBottom: bounds.bottom + frameRect.top,
+    };
+  });
+}
+
 test.describe('@mobile mobile layout', () => {
   test.use({ serviceWorkers: 'block' });
   test('has no horizontal overflow at common phone and tablet widths', async ({ page }) => {
@@ -750,5 +787,19 @@ test.describe('@mobile mobile layout', () => {
     expect(savedHighlight.highlight_text).toBe(selectedText);
     expect(savedHighlight.cfi).toMatch(/^epubcfi\(.*,.+,.+\)$/);
     expect(savedHighlight.color).toBe('yellow');
+  });
+
+  test('places the highlight toolbar above a multiline selection', async ({ page }) => {
+    await openFixture(page);
+    await expect(page.locator('#page-text')).toHaveText(/第\s*\d+\s*\/\s*\d+\s*页/, { timeout: 15_000 });
+
+    const selectionBounds = await selectMultilineIframeText(page);
+    const toolbar = page.locator('#selection-toolbar');
+    await expect(toolbar).toBeVisible();
+
+    const toolbarBounds = await toolbar.boundingBox();
+    expect(toolbarBounds).not.toBeNull();
+    expect(toolbarBounds.y + toolbarBounds.height).toBeLessThanOrEqual(selectionBounds.selectionTop + 1);
+    expect(toolbarBounds.y + toolbarBounds.height).toBeLessThan(selectionBounds.selectionBottom - 8);
   });
 });

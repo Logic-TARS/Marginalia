@@ -273,6 +273,7 @@ test.describe('automatic narration player', () => {
     const pageBeforeLockedNavigation = await page.locator('#page-text').textContent();
     await page.keyboard.press('ArrowRight');
     await iframe.evaluate(frame => frame.contentDocument.dispatchEvent(new WheelEvent('wheel', { deltaY: 180, cancelable: true })));
+    await page.locator('#btn-reveal-navigator').click();
     await page.locator('#toc-list .toc-item', { hasText: 'Chapter 2' }).click();
     await expect(page.locator('#page-text')).toHaveText(pageBeforeLockedNavigation);
     await expect(page.locator('#toolbar-chapter')).toContainText('Chapter 1');
@@ -326,6 +327,7 @@ test.describe('automatic narration player', () => {
     await expect(page.locator('#reader-view')).not.toHaveClass(/tts-navigation-locked/);
 
     // A directory chapter switch must cancel the active task view and reset controls.
+    await page.locator('#btn-reveal-navigator').click();
     await page.locator('#toc-list .toc-item', { hasText: 'Chapter 2' }).click();
     await expect(page.locator('#toolbar-chapter')).not.toContainText('Chapter 1', { timeout: 15_000 });
     await expect(page.locator('#tts-segment-label')).toHaveText('第 0 / 0 段');

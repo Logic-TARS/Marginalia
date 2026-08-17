@@ -1603,7 +1603,7 @@ body.reader-active .operation-status {
   position: absolute;
   top: 50%;
   left: 0;
-  z-index: 43;
+  z-index: 45;
   width: 44px;
   min-height: 76px;
   padding: 8px 5px;
@@ -1621,23 +1621,48 @@ body.reader-active .operation-status {
 }
 
 #reader-view.navigator-open .reader-navigator-reveal {
-  visibility: hidden;
-  pointer-events: none;
   opacity: 0;
   transform: translate(-100%, -50%);
 }
 
+.reader-notes-reveal {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  z-index: 45;
+  width: 44px;
+  min-height: 76px;
+  padding: 8px 5px;
+  border: 1px solid rgba(157, 142, 118, 0.36);
+  border-right: 0;
+  border-radius: 9px 0 0 9px;
+  background: rgba(255, 253, 248, 0.92);
+  color: var(--accent);
+  box-shadow: var(--shadow-sm);
+  font-size: 12px;
+  line-height: 1.25;
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: opacity var(--transition-fast), transform var(--transition-fast), visibility var(--transition-fast);
+}
+
+#reader-view.notes-open .reader-notes-reveal {
+  opacity: 0;
+  transform: translate(100%, -50%);
+}
+
 .reader-main {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr) 330px;
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 16px;
   padding: 14px 16px;
 }
 
 .reader-main.ai-collapsed {
-  grid-template-columns: minmax(0, 1fr) 330px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .reader-main.notes-collapsed {
@@ -1664,7 +1689,10 @@ body.reader-active .operation-status {
 }
 
 .notes-panel.collapsed {
-  display: none;
+  visibility: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(calc(100% + 22px));
 }
 
 .reader-panel-backdrop,
@@ -1969,6 +1997,12 @@ body.reader-active .operation-status {
 }
 
 .notes-panel {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  bottom: 14px;
+  z-index: 44;
+  width: min(330px, calc(100% - 32px));
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -1976,7 +2010,10 @@ body.reader-active .operation-status {
   border: 1px solid rgba(157, 142, 118, 0.34);
   border-radius: var(--radius-lg);
   background: linear-gradient(180deg, rgba(255, 253, 248, 0.97), rgba(248, 244, 236, 0.94));
-  box-shadow: var(--shadow-sm);
+  box-shadow: 12px 18px 44px rgba(55, 45, 31, 0.16), inset 0 1px rgba(255, 255, 255, 0.76);
+  opacity: 1;
+  transform: translateX(0);
+  transition: opacity 180ms ease, transform 220ms ease, visibility 220ms;
 }
 
 .notes-panel-header {
@@ -2584,15 +2621,14 @@ body.reader-active .operation-status {
 .reader-chrome-reveal {
   position: fixed;
   z-index: 67;
-  top: max(10px, calc(env(safe-area-inset-top) + 8px));
-  right: max(8px, calc(env(safe-area-inset-right) + 6px));
-  width: auto;
-  min-width: 58px;
-  min-height: 36px;
-  display: none;
+  top: max(6px, calc(env(safe-area-inset-top) + 4px));
+  left: 50%;
+  width: min(220px, calc(100% - 32px));
+  min-height: 28px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 7px 12px;
+  padding: 5px 12px;
   border: 1px solid rgba(157, 142, 118, 0.42);
   border-radius: 999px;
   background: rgba(255, 253, 248, 0.82);
@@ -2602,12 +2638,18 @@ body.reader-active .operation-status {
   line-height: 1.15;
   box-shadow: var(--shadow-sm);
   backdrop-filter: blur(8px);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -8px);
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
   cursor: pointer;
   touch-action: manipulation;
 }
 
 body.reader-chrome-hidden .reader-chrome-reveal {
-  display: inline-flex;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
 }
 
 .selection-toolbar {
@@ -2835,8 +2877,7 @@ body.reader-chrome-hidden .reader-chrome-reveal {
 }
 
 @media (min-width: 901px) {
-  body.reader-active .ai-panel,
-  body.reader-active .notes-panel {
+  body.reader-active .ai-panel {
     margin-top: var(--toolbar-height);
     margin-bottom: var(--footer-height);
   }
@@ -3168,6 +3209,10 @@ body.reader-chrome-hidden .reader-chrome-reveal {
     min-height: 88px;
   }
 
+  .reader-notes-reveal {
+    display: none;
+  }
+
   .reader-navigator-header .btn,
   .toc-item,
   .bookmark-main,
@@ -3200,6 +3245,9 @@ body.reader-chrome-hidden .reader-chrome-reveal {
   .notes-panel.collapsed,
   .search-panel[hidden] {
     display: none;
+    visibility: visible;
+    opacity: 1;
+    transform: none;
   }
 
   .mobile-panel-close {

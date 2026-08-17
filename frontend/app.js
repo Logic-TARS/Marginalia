@@ -100,6 +100,9 @@
   let readerChromeVisible = true;
   let readerChromeAutoHideEnabled = true;
   let readerChromeHideTimer = null;
+  let readerChromeHoverCloseTimer = null;
+  let readerNavigatorHoverCloseTimer = null;
+  let readerNotesHoverCloseTimer = null;
   let readerIframeObserver = null;
   let currentView = 'home';
   let ttsTask = null;
@@ -148,6 +151,7 @@
     epubContainer: $('#epub-container'),
     notesPanel: $('#notes-panel'),
     btnCloseNotesPanel: $('#btn-close-notes-panel'),
+    btnRevealNotes: $('#btn-reveal-notes'),
     readerPanelBackdrop: $('#reader-panel-backdrop'),
     bookmarksList: $('#bookmarks-list'),
     bookmarksCount: $('#bookmarks-count'),
@@ -644,12 +648,12 @@
     dom.readerView.classList.add('active');
     dom.creationView.classList.remove('active');
     document.body.classList.add('reader-active');
-    setReaderChromeVisible(true);
+    setReaderChromeVisible(isMobileLayout());
     currentView = 'reader';
     writeViewHistory('reader', historyMode, { bookId: bookId || currentBookMeta?.id || '' });
     syncReaderToolStates();
     syncReaderPanelBackdrop();
-    if (currentRendition) scheduleReaderChromeHide(READER_CHROME_INITIAL_HIDE_MS);
+    if (currentRendition && isMobileLayout()) scheduleReaderChromeHide(READER_CHROME_INITIAL_HIDE_MS);
   }
 
   async function showCreation({ historyMode = 'push' } = {}) {
@@ -783,6 +787,7 @@
 
   function scheduleReaderChromeHide(delay = READER_CHROME_AUTO_HIDE_MS) {
     cancelReaderChromeHide();
+    if (!isMobileLayout()) return;
     if (!canAutoHideReaderChrome()) return;
     readerChromeHideTimer = setTimeout(() => {
       readerChromeHideTimer = null;
@@ -790,9 +795,31 @@
     }, delay);
   }
 
-  function revealReaderChromeTemporarily() {
+  function cancelReaderChromeHoverClose() {
+    if (!readerChromeHoverCloseTimer) return;
+    clearTimeout(readerChromeHoverCloseTimer);
+    readerChromeHoverCloseTimer = null;
+  }
+
+  function openReaderChromeOnHover() {
+    if (isMobileLayout()) return;
+    cancelReaderChromeHoverClose();
     setReaderChromeVisible(true);
-    scheduleReaderChromeHide();
+  }
+
+  function scheduleReaderChromeHoverClose() {
+    if (isMobileLayout()) return;
+    cancelReaderChromeHoverClose();
+    readerChromeHoverCloseTimer = setTimeout(() => {
+      readerChromeHoverCloseTimer = null;
+      setReaderChromeVisible(false);
+    }, 160);
+  }
+
+  function revealReaderChromeTemporarily() {
+    cancelReaderChromeHoverClose();
+    setReaderChromeVisible(true);
+    if (isMobileLayout()) scheduleReaderChromeHide();
   }
 
   function toggleReaderChromeFromContent() {
@@ -830,7 +857,8 @@
     }
     updateReaderChromeAutoHideUI();
     if (readerChromeAutoHideEnabled) {
-      scheduleReaderChromeHide();
+      if (isMobileLayout()) scheduleReaderChromeHide();
+      else setReaderChromeVisible(false);
     } else {
       cancelReaderChromeHide();
       setReaderChromeVisible(true);
@@ -991,6 +1019,7 @@
       dom.notesPanel.classList.remove('open');
       dom.notesPanel.classList.add('collapsed');
       dom.readerMain.classList.add('notes-collapsed');
+      dom.readerView.classList.remove('notes-open');
     }
     if (except !== 'search') {
       dom.searchPanel.hidden = true;
@@ -1023,8 +1052,10 @@
   function setReaderNavigatorOpen(open, { restoreFocus = false } = {}) {
     const shouldOpen = Boolean(open);
     if (shouldOpen) {
-      setReaderChromeVisible(true);
-      cancelReaderChromeHide();
+      if (isMobileLayout()) {
+        setReaderChromeVisible(true);
+        cancelReaderChromeHide();
+      }
       closeOtherMobileReaderPanels('navigator');
       if (isMobileLayout()) {
         setReaderToolsOpen(false, { skipChromeSchedule: true });
@@ -1048,6 +1079,27 @@
 
   function toggleReaderNavigator() {
     setReaderNavigatorOpen(dom.readerNavigator.classList.contains('collapsed'));
+  }
+
+  function cancelReaderNavigatorHoverClose() {
+    if (!readerNavigatorHoverCloseTimer) return;
+    clearTimeout(readerNavigatorHoverCloseTimer);
+    readerNavigatorHoverCloseTimer = null;
+  }
+
+  function openReaderNavigatorOnHover() {
+    if (isMobileLayout()) return;
+    cancelReaderNavigatorHoverClose();
+    setReaderNavigatorOpen(true);
+  }
+
+  function scheduleReaderNavigatorHoverClose() {
+    if (isMobileLayout()) return;
+    cancelReaderNavigatorHoverClose();
+    readerNavigatorHoverCloseTimer = setTimeout(() => {
+      readerNavigatorHoverCloseTimer = null;
+      setReaderNavigatorOpen(false);
+    }, 160);
   }
 
   function setReaderToolsOpen(open, { restoreFocus = false, skipChromeSchedule = false } = {}) {
@@ -4451,7 +4503,21 @@
     const clientRects = typeof range.getClientRects === 'function'
       ? Array.from(range.getClientRects()).filter(item => item.width || item.height)
       : [];
-    const rect = clientRects[clientRects.length - 1] || range.getBoundingClientRect();
+    const boundingRect = range.getBoundingClientRect();
+    const anchorRect = clientRects[0] || boundingRect;
+    const selectionBounds = clientRects.length
+      ? clientRects.reduce((bounds, item) => ({
+        top: Math.min(bounds.top, item.top),
+        right: Math.max(bounds.right, item.right),
+        bottom: Math.max(bounds.bottom, item.bottom),
+        left: Math.min(bounds.left, item.left),
+      }), {
+        top: clientRects[0].top,
+        right: clientRects[0].right,
+        bottom: clientRects[0].bottom,
+        left: clientRects[0].left,
+      })
+      : boundingRect;
     const frameRect = iframe ? iframe.getBoundingClientRect() : null;
     const toolbar = dom.selectionToolbar;
     const wasHidden = toolbar.hidden;
@@ -4461,9 +4527,11 @@
       toolbar.style.visibility = 'hidden';
     }
 
-    const selectionTop = rect.top + (frameRect ? frameRect.top : 0);
-    const selectionBottom = rect.bottom + (frameRect ? frameRect.top : 0);
-    const selectionLeft = rect.left + (frameRect ? frameRect.left : 0);
+    const frameTop = frameRect ? frameRect.top : 0;
+    const frameLeft = frameRect ? frameRect.left : 0;
+    const selectionTop = selectionBounds.top + frameTop;
+    const selectionBottom = selectionBounds.bottom + frameTop;
+    const anchorLeft = anchorRect.left + frameLeft;
     const visualViewport = window.visualViewport;
     const viewportTop = visualViewport ? visualViewport.offsetTop : 0;
     const viewportLeft = visualViewport ? visualViewport.offsetLeft : 0;
@@ -4472,7 +4540,7 @@
     const edgeGap = 8;
 
     let top = selectionTop - toolbar.offsetHeight - edgeGap;
-    let left = selectionLeft + (rect.width / 2) - (toolbar.offsetWidth / 2);
+    let left = anchorLeft + (anchorRect.width / 2) - (toolbar.offsetWidth / 2);
 
     // Keep the controls inside the visual viewport, including when the soft
     // keyboard is open or the page is running as an installed PWA.
@@ -5079,18 +5147,42 @@
       ? forceOpen
       : dom.notesPanel.classList.contains('collapsed');
     if (shouldOpen) {
-      setReaderChromeVisible(true);
-      cancelReaderChromeHide();
+      if (isMobileLayout()) {
+        setReaderChromeVisible(true);
+        cancelReaderChromeHide();
+      }
       closeOtherMobileReaderPanels('notes');
       if (isMobileLayout()) setReaderToolsOpen(false, { skipChromeSchedule: true });
     }
     dom.notesPanel.classList.toggle('open', shouldOpen && isMobileLayout());
     dom.notesPanel.classList.toggle('collapsed', !shouldOpen);
     dom.readerMain.classList.toggle('notes-collapsed', !shouldOpen);
-    refreshReaderLayout();
+    dom.readerView.classList.toggle('notes-open', shouldOpen);
+    if (isMobileLayout()) refreshReaderLayout();
     syncReaderToolStates();
     syncReaderPanelBackdrop();
     if (!shouldOpen) scheduleReaderChromeHide();
+  }
+
+  function cancelReaderNotesHoverClose() {
+    if (!readerNotesHoverCloseTimer) return;
+    clearTimeout(readerNotesHoverCloseTimer);
+    readerNotesHoverCloseTimer = null;
+  }
+
+  function openReaderNotesOnHover() {
+    if (isMobileLayout()) return;
+    cancelReaderNotesHoverClose();
+    toggleNotesPanel(true);
+  }
+
+  function scheduleReaderNotesHoverClose() {
+    if (isMobileLayout()) return;
+    cancelReaderNotesHoverClose();
+    readerNotesHoverCloseTimer = setTimeout(() => {
+      readerNotesHoverCloseTimer = null;
+      toggleNotesPanel(false);
+    }, 160);
   }
 
   function toggleAiPanel(forceOpen) {
@@ -5901,18 +5993,25 @@
 
   // ==================== EVENT BINDINGS ====================
   function bindEvents() {
+    [dom.btnRevealReaderChrome, dom.readerToolbar, dom.readerToolPanel].forEach((element) => {
+      if (!element) return;
+      element.addEventListener('pointerenter', openReaderChromeOnHover);
+      element.addEventListener('pointerleave', scheduleReaderChromeHoverClose);
+      element.addEventListener('focusin', openReaderChromeOnHover);
+      element.addEventListener('focusout', scheduleReaderChromeHoverClose);
+    });
+
     [dom.readerToolbar, dom.readerToolPanel].forEach((element) => {
       if (!element) return;
       element.addEventListener('pointerdown', () => {
         if (!dom.readerView.classList.contains('active')) return;
         setReaderChromeVisible(true);
         cancelReaderChromeHide();
+        cancelReaderChromeHoverClose();
       });
       element.addEventListener('click', () => {
-        setTimeout(() => scheduleReaderChromeHide(), 0);
+        if (isMobileLayout()) setTimeout(() => scheduleReaderChromeHide(), 0);
       });
-      element.addEventListener('focusin', () => cancelReaderChromeHide());
-      element.addEventListener('focusout', () => setTimeout(() => scheduleReaderChromeHide(), 0));
     });
 
     dom.btnLibraryCreate.addEventListener('click', () => showCreation());
@@ -5933,6 +6032,12 @@
     dom.btnToggleNavigator.addEventListener('click', toggleReaderNavigator);
     dom.btnCloseNavigator.addEventListener('click', () => setReaderNavigatorOpen(false, { restoreFocus: true }));
     dom.btnRevealNavigator.addEventListener('click', () => setReaderNavigatorOpen(true));
+    [dom.btnRevealNavigator, dom.readerNavigator].forEach((element) => {
+      element.addEventListener('pointerenter', openReaderNavigatorOnHover);
+      element.addEventListener('pointerleave', scheduleReaderNavigatorHoverClose);
+      element.addEventListener('focusin', openReaderNavigatorOnHover);
+      element.addEventListener('focusout', scheduleReaderNavigatorHoverClose);
+    });
     dom.btnRevealReaderChrome.addEventListener('click', () => revealReaderChromeTemporarily());
     dom.btnToggleAi.addEventListener('click', () => toggleAiPanel());
     dom.btnCloseAi.addEventListener('click', () => toggleAiPanel(false));
@@ -6011,6 +6116,13 @@
     // Toggle notes panel
     dom.btnAddBookmark.addEventListener('click', addBookmark);
     dom.btnToggleNotes.addEventListener('click', () => toggleNotesPanel());
+    dom.btnRevealNotes.addEventListener('click', () => toggleNotesPanel(true));
+    [dom.btnRevealNotes, dom.notesPanel].forEach((element) => {
+      element.addEventListener('pointerenter', openReaderNotesOnHover);
+      element.addEventListener('pointerleave', scheduleReaderNotesHoverClose);
+      element.addEventListener('focusin', openReaderNotesOnHover);
+      element.addEventListener('focusout', scheduleReaderNotesHoverClose);
+    });
     dom.btnToggleReaderAutoHide.addEventListener('click', () => {
       setReaderChromeAutoHideEnabled(!readerChromeAutoHideEnabled);
     });
@@ -6231,11 +6343,15 @@
     mobileLayoutMedia.addEventListener('change', () => {
       dom.notesPanel.classList.remove('open');
       document.body.classList.remove('reader-panel-open');
-      resetReaderChrome();
-      setReaderNavigatorOpen(!isMobileLayout());
+      cancelReaderChromeHoverClose();
+      cancelReaderNavigatorHoverClose();
+      cancelReaderNotesHoverClose();
+      setReaderChromeVisible(isMobileLayout());
+      setReaderNavigatorOpen(false);
+      toggleNotesPanel(false);
       syncReaderPanelBackdrop();
       refreshReaderLayout();
-      if (dom.readerView.classList.contains('active')) scheduleReaderChromeHide(READER_CHROME_INITIAL_HIDE_MS);
+      if (dom.readerView.classList.contains('active') && isMobileLayout()) scheduleReaderChromeHide(READER_CHROME_INITIAL_HIDE_MS);
     });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
@@ -6268,7 +6384,7 @@
 
     loadReaderChromeAutoHidePreference();
     loadReaderTypographyPreference();
-    setReaderNavigatorOpen(!isMobileLayout());
+    setReaderNavigatorOpen(false);
     loadTtsVoices().catch(() => {});
     observeReaderIframes();
     bindEvents();

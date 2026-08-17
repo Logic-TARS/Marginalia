@@ -128,20 +128,32 @@ test.describe('@smoke', () => {
     const hostBefore = await page.locator('#epub-container').boundingBox();
     const pageBefore = await getPageInfo(page);
 
-    await expect(navigator).toBeVisible();
-    await expect(page.locator('#toc-list .toc-item')).toHaveCount(3);
-    await expect(page.locator('#toc-list .toc-item').first()).toHaveAttribute('aria-current', 'location');
-    await page.locator('#btn-close-navigator').click();
     await expect(navigator).toBeHidden();
     await expect(page.locator('#btn-reveal-navigator')).toBeVisible();
+
+    await page.locator('#btn-reveal-navigator').hover();
+    await expect(navigator).toBeVisible();
+    await expect(page.locator('#reader-view')).toHaveClass(/reader-chrome-hidden/);
+    await expect(page.locator('#toc-list .toc-item')).toHaveCount(3);
+    await expect(page.locator('#toc-list .toc-item').first()).toHaveAttribute('aria-current', 'location');
     expectSameBounds(await page.locator('#epub-container').boundingBox(), hostBefore);
     expect(await getPageInfo(page)).toEqual(pageBefore);
 
-    await page.locator('#btn-reveal-navigator').click();
+    await page.locator('#epub-container').hover();
+    await expect(navigator).toBeHidden();
+    await page.locator('#btn-reveal-notes').hover();
+    await expect(page.locator('#notes-panel')).toBeVisible();
+    await expect(page.locator('#reader-view')).toHaveClass(/reader-chrome-hidden/);
+    await page.locator('#epub-container').hover();
+    await expect(page.locator('#notes-panel')).toBeHidden();
+    await page.locator('#btn-reveal-navigator').hover();
     await expect(navigator).toBeVisible();
+    await page.locator('#btn-reveal-reader-chrome').click();
+    await expect(page.locator('#reader-view')).not.toHaveClass(/reader-chrome-hidden/);
     await page.locator('#btn-reader-tools').click();
     await page.locator('#btn-add-bookmark').click();
     await expect(page.locator('#bookmarks-count')).toHaveText('1');
+    await page.locator('#btn-reveal-navigator').click();
     await expect(page.locator('#bookmarks-list .bookmark-item')).toHaveCount(1);
     await page.locator('#bookmarks-list .bookmark-delete').click();
     await expect(page.locator('#bookmarks-count')).toHaveText('0');
@@ -258,6 +270,7 @@ test.describe('@boundary.backward', () => {
 
     for (let run = 0; run < RUNS; run++) {
       // Use the reader directory to enter chapter 2 before navigating backward.
+      await page.locator('#btn-reveal-navigator').click();
       await expect(page.locator('#toc-list .toc-item')).toHaveCount(3);
       await page.locator('#toc-list .toc-item', { hasText: 'Chapter 2' }).click();
       await page.locator('#btn-close-navigator').click();
