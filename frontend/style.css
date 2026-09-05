@@ -2488,6 +2488,10 @@ body.reader-active .operation-status {
   background: rgba(255, 253, 248, 0.5);
 }
 
+.pane-heading > div {
+  min-width: 0;
+}
+
 .pane-heading .eyebrow {
   margin-bottom: 5px;
   font-size: 10px;
@@ -2520,6 +2524,11 @@ body.reader-active .operation-status {
 }
 
 .material-check {
+  grid-column: 1 / -1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 10px;
   padding-top: 2px;
 }
 
@@ -2530,11 +2539,35 @@ body.reader-active .operation-status {
   accent-color: var(--accent);
 }
 
+.material-quote,
+.material-note,
+.material-card > .note-item-tags,
+.material-card > .note-item-meta {
+  grid-column: 2;
+  min-width: 0;
+}
+
+#creation-view .pane-heading p,
+.material-check span,
+.material-quote,
+.material-note,
+.material-card > .note-item-meta,
+.selected-material-detail {
+  overflow-wrap: anywhere;
+}
+
+.material-quote,
+.material-note,
+.selected-material-detail blockquote {
+  white-space: pre-wrap;
+}
+
 .material-quote {
   font-size: 14px;
 }
 
 .selected-material-detail {
+  min-width: 0;
   min-height: 170px;
   margin: 16px 16px 0;
   padding: 16px;
@@ -2774,7 +2807,9 @@ body.reader-chrome-hidden .reader-chrome-reveal {
 .modal-footer .btn,
 .operation-status .btn,
 .library-actions .btn,
-.creation-actions .btn {
+.creation-actions .btn,
+.draft-actions .btn,
+.reflection-actions .btn {
   line-height: 1.3;
   white-space: normal;
 }

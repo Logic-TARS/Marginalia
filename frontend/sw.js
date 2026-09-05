@@ -2,7 +2,7 @@
  * Marginalia Service Worker
  * Versioned app-shell cache plus a stable EPUB cache.
  */
-const APP_CACHE_NAME = 'marginalia-app-v34';
+const APP_CACHE_NAME = 'marginalia-app-v35';
 const EPUB_CACHE_NAME = 'marginalia-epub-v1';
 const LEGACY_CACHE_PREFIX = 'marginalia-v';
 
@@ -10,7 +10,7 @@ const APP_SHELL = [
   '.',
   'index.html',
   'app.js?v=33',
-  'style.css?v=31',
+  'style.css?v=32',
   'manifest.json',
   'jszip.min.js',
   'epub.min.js',
